@@ -20,7 +20,7 @@ This method allows to convert a model configuration after it has been manually e
 - Fetch the health model configuration from the Azure portal:
 ![get resource json](./docs/ahm_v1_json.png)
 
-- Copy the entire JSON definition and store it in a local file
+- Copy the entire JSON definition and store it in a local file, e.g. under **/tmp/v1_input.json**
 ![resource json](./docs/ahm_v1_resource.png)
 
 ```bash
