@@ -1,4 +1,4 @@
-name: Create Release
+name: Build Release Artifacts
 
 on:
   workflow_dispatch:
@@ -7,8 +7,11 @@ on:
         description: 'Optional release version override (default: auto-generated)'
         required: false
 
+permissions:
+  contents: read
+
 jobs:
-  build_and_release:
+  build_artifacts:
     runs-on: ubuntu-latest
     
     steps:
@@ -51,16 +54,13 @@ jobs:
         VERSION="v$MAJOR.$MINOR.$DATE_TAG"
         echo "version=$VERSION" >> $GITHUB_OUTPUT
         echo "Generated version: $VERSION"
-        
+
     - name: Restore dependencies
       run: dotnet restore src/Microsoft.CloudHealth.PreviewMigration.csproj
-      
-    - name: Build
-      run: dotnet build src/Microsoft.CloudHealth.PreviewMigration.csproj --configuration Release --no-restore
-      
+
     - name: Publish Windows
       run: dotnet publish src/Microsoft.CloudHealth.PreviewMigration.csproj --configuration Release -o publish/win-x64 --self-contained -r win-x64 -p:PublishSingleFile=true
-      
+
     - name: Publish macOS
       run: dotnet publish src/Microsoft.CloudHealth.PreviewMigration.csproj --configuration Release -o publish/osx-x64 --self-contained -r osx-x64 -p:PublishSingleFile=true
 
@@ -74,12 +74,21 @@ jobs:
         cd publish/osx-x64
         zip -r ../../AzureMonitorHealthModels-migration-utility-osx-x64-${{ steps.version.outputs.version }}.zip *
 
-    - name: Create Release
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    - name: Upload Windows Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: windows-release-${{ steps.version.outputs.version }}
+        path: ./AzureMonitorHealthModels-migration-utility-win-x64-${{ steps.version.outputs.version }}.zip
+
+    - name: Upload macOS Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: macos-release-${{ steps.version.outputs.version }}
+        path: ./AzureMonitorHealthModels-migration-utility-osx-x64-${{ steps.version.outputs.version }}.zip
+
+    - name: Summary
       run: |
-        gh release create ${{ steps.version.outputs.version }} \
-          --title "Release ${{ steps.version.outputs.version }}" \
-          --draft \
-          ./AzureMonitorHealthModels-migration-utility-win-x64-${{ steps.version.outputs.version }}.zip \
-          ./AzureMonitorHealthModels-migration-utility-osx-x64-${{ steps.version.outputs.version }}.zip
+        echo "## Release Artifacts Built! 🎉" >> $GITHUB_STEP_SUMMARY
+        echo "Version: ${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "Download the artifacts above and manually create a release with tag: ${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
