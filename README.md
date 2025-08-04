@@ -1,4 +1,4 @@
-# Project
+# Azure MonitorH ealth Models migration utility
 
 This is a simple tool to convert a Azure Health Models **Private Preview** configuration to an Azure Monitor Health Models **Public Preview** configuration. It outputs either a Bicep or ARM template file to deploy a new Public Preview health model resource with all related resource types.
 
