@@ -1,14 +1,44 @@
 # Project
 
-> This repo has been populated by an initial template to help get you started. Please
-> make sure to update the content to build a great experience for community-building.
+This is a simple tool to convert a Azure Health Models **Private Preview** configuration to an Azure Monitor Health Models **Public Preview** configuration. It outputs either a Bicep or ARM template file to deploy a new Public Preview health model resource with all related resource types.
 
-As the maintainer of this project, please make a few updates:
+## Usage
 
-- Improving this README.MD file to provide a great experience
-- Updating SUPPORT.MD with content about this project's support experience
-- Understanding the security reporting process in SECURITY.MD
-- Remove this section from the README
+There are two modes:
+
+- File input
+- Load private preview configuration directly from Azure
+
+## Prerequisites
+
+- .NET 8 runtime installed
+
+### File input
+
+This method allows to convert a model configuration after it has been manually exported from Azure and stored in a file. The tool will not require any connection/permission to Azure.
+
+- Fetch the health model configuration from the Azure portal:
+![get resource json](./docs/ahm_v1_json.png)
+
+- Copy the entire JSON definition and store it in a local file
+![resource json](./docs/ahm_v1_resource.png)
+
+```bash
+dotnet Microsoft.CloudHealth.PreviewMigration.dll convert file --inputfile /tmp/v1_input.json --outputfolder /tmp
+```
+
+### Load private preview configuration from Azure
+
+This method will attempt to fetch the health model directly from Azure, using only a resourceId as input. It requires your current user being logged in using Azure CLI etc.
+
+- Get the resource id of the health model resource
+- Run `az login` on your command prompt before executing the command below
+
+```bash
+dotnet Microsoft.CloudHealth.PreviewMigration.dll convert azure --resourceId /subscriptions/7ddfffd7-abcd-40df-b352-828cbd55d6f4/resourceGroups/demo-rg/providers/Microsoft.HealthModel/healthmodels/my-model --outputfolder /tmp --armtemplate
+```
+
+You can see the optional switch `--armtemplate` which will output a compiled ARM template instead of a Bicep file.
 
 ## Contributing
 
