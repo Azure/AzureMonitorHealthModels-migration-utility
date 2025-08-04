@@ -75,32 +75,11 @@ jobs:
         zip -r ../../AzureMonitorHealthModels-migration-utility-osx-x64-${{ steps.version.outputs.version }}.zip *
 
     - name: Create Release
-      id: create_release
-      uses: actions/create-release@v1
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        tag_name: ${{ steps.version.outputs.version }}
-        release_name: Release ${{ steps.version.outputs.version }}
-        draft: true
-        prerelease: false
-
-    - name: Upload Windows Release Asset
-      uses: actions/upload-release-asset@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: ./AzureMonitorHealthModels-migration-utility-win-x64-${{ steps.version.outputs.version }}.zip
-        asset_name: AzureMonitorHealthModels-migration-utility-win-x64-${{ steps.version.outputs.version }}.zip
-        asset_content_type: application/zip
-
-    - name: Upload macOS Release Asset
-      uses: actions/upload-release-asset@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: ./AzureMonitorHealthModels-migration-utility-osx-x64-${{ steps.version.outputs.version }}.zip
-        asset_name: AzureMonitorHealthModels-migration-utility-osx-x64-${{ steps.version.outputs.version }}.zip
-        asset_content_type: application/zip
+      run: |
+        gh release create ${{ steps.version.outputs.version }} \
+          --title "Release ${{ steps.version.outputs.version }}" \
+          --draft \
+          ./AzureMonitorHealthModels-migration-utility-win-x64-${{ steps.version.outputs.version }}.zip \
+          ./AzureMonitorHealthModels-migration-utility-osx-x64-${{ steps.version.outputs.version }}.zip
