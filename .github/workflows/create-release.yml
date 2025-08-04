@@ -59,10 +59,10 @@ jobs:
       run: dotnet build src/Microsoft.CloudHealth.PreviewMigration.csproj --configuration Release --no-restore
       
     - name: Publish Windows
-      run: dotnet publish src/Microsoft.CloudHealth.PreviewMigration.csproj --configuration Release --no-build -o publish/win-x64 --self-contained -r win-x64 -p:PublishSingleFile=true
+      run: dotnet publish src/Microsoft.CloudHealth.PreviewMigration.csproj --configuration Release -o publish/win-x64 --self-contained -r win-x64 -p:PublishSingleFile=true
       
     - name: Publish macOS
-      run: dotnet publish src/Microsoft.CloudHealth.PreviewMigration.csproj --configuration Release --no-build -o publish/osx-x64 --self-contained -r osx-x64 -p:PublishSingleFile=true
+      run: dotnet publish src/Microsoft.CloudHealth.PreviewMigration.csproj --configuration Release -o publish/osx-x64 --self-contained -r osx-x64 -p:PublishSingleFile=true
 
     - name: Zip Windows release assets
       run: |
@@ -82,7 +82,7 @@ jobs:
       with:
         tag_name: ${{ steps.version.outputs.version }}
         release_name: Release ${{ steps.version.outputs.version }}
-        draft: false
+        draft: true
         prerelease: false
 
     - name: Upload Windows Release Asset
