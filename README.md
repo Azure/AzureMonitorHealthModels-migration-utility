@@ -2,16 +2,22 @@
 
 This is a simple tool to convert a Azure Health Models **Private Preview** configuration to an Azure Monitor Health Models **Public Preview** configuration. It outputs either a Bicep or ARM template file to deploy a new Public Preview health model resource with all related resource types.
 
-## Usage
-
-There are two modes:
-
-- File input
-- Load private preview configuration directly from Azure
-
 ## Prerequisites
 
 - .NET 8 runtime installed
+- Utility tool binaries downloaded from the **Releases** section of this GitHub repository.
+
+## Remarks
+
+- The public preview is not available in all the same Azure locations as the private preview version. The migration tool will thus default to another location if your former location is currently not yet supported.
+- There are minor scenarios which cannot be migrated 1:1. Watch out in the tool's log output for any warnings.
+
+## Usage
+
+The migration utility has two modes:
+
+- File input
+- Load private preview configuration directly from Azure
 
 ### File input
 
@@ -24,7 +30,7 @@ This method allows to convert a model configuration after it has been manually e
 ![resource json](./docs/ahm_v1_resource.png)
 
 ```bash
-dotnet Microsoft.CloudHealth.PreviewMigration.dll convert file --inputfile /tmp/v1_input.json --outputfolder /tmp
+Microsoft.CloudHealth.PreviewMigration.exe convert file --inputfile /tmp/v1_input.json --outputfolder /tmp
 ```
 
 ### Load private preview configuration from Azure
@@ -32,27 +38,37 @@ dotnet Microsoft.CloudHealth.PreviewMigration.dll convert file --inputfile /tmp/
 This method will attempt to fetch the health model directly from Azure, using only a resourceId as input. It requires your current user being logged in using Azure CLI etc.
 
 - Get the resource id of the health model resource
-- Run `az login` on your command prompt before executing the command below
 
 ```bash
-dotnet Microsoft.CloudHealth.PreviewMigration.dll convert azure --resourceId /subscriptions/7ddfffd7-abcd-40df-b352-828cbd55d6f4/resourceGroups/demo-rg/providers/Microsoft.HealthModel/healthmodels/my-model --outputfolder /tmp --armtemplate
+Microsoft.CloudHealth.PreviewMigration.exe convert azure --resourceId /subscriptions/7ddfffd7-abcd-40df-b352-828cbd55d6f4/resourceGroups/demo-rg/providers/Microsoft.HealthModel/healthmodels/my-model --outputfolder /tmp --armtemplate
 ```
 
 You can see the optional switch `--armtemplate` which will output a compiled ARM template instead of a Bicep file.
 
-## Contributing
+### Deploy new resource to Azure
 
-This project welcomes contributions and suggestions.  Most contributions require you to agree to a
-Contributor License Agreement (CLA) declaring that you have the right to, and actually do, grant us
-the rights to use your contribution. For details, visit [Contributor License Agreements](https://cla.opensource.microsoft.com).
+After you executed the commands above, in your specified output folder you will find a Bicep or ARM template file. You can use that to directly deploy a new health model resource to Azure:
 
-When you submit a pull request, a CLA bot will automatically determine whether you need to provide
-a CLA and decorate the PR appropriately (e.g., status check, comment). Simply follow the instructions
-provided by the bot. You will only need to do this once across all repos using our CLA.
+#### Deploy via CLI
 
-This project has adopted the [Microsoft Open Source Code of Conduct](https://opensource.microsoft.com/codeofconduct/).
-For more information see the [Code of Conduct FAQ](https://opensource.microsoft.com/codeofconduct/faq/) or
-contact [opencode@microsoft.com](mailto:opencode@microsoft.com) with any additional questions or comments.
+If you have the Azure CLI installed, you can start the deployment like this
+
+```bash
+az account set --subscription <target subscription id>
+az deployment group create --resource-group <your target resource group> --template-file <generated-arm-template|bicep file>
+```
+
+You can overwrite the default parameters for resource name and location using the `--parameters` argument.
+
+#### Deploy via Azure Portal
+
+> This requires that you have run the migration tool with the `--armtemplate` switch. Or you manually run `az bicep build --file <generated bicep file>`
+
+1) In the search box on top of the Portal type **deploy a custom template** ![deploy](./docs/portal_deploy.png)
+1) Click on **Build your own template in the editor**
+1) Click on **Load file** and select your generated ARM template JSON file. ![editor](./docs/edit_template.png)
+1) Click on Save.
+1) Validate the parameters, click on **Review + Create** and start the deployment.
 
 ## Trademarks
 
