@@ -8,17 +8,18 @@ public class HealthModel : IResourceType
     public string Type => $"{Constants.ProviderNamespace}/{Constants.HealthModelsResourceType}";
     public string ApiVersion => "2025-05-01-preview";
 
-    public required string Location { get; set; }
+    public string? Location { get; set; }
     public Dictionary<string, string>? Tags { get; set; }
     public Identity? Identity { get; set; }
     public HealthModelProperties Properties { get; set; }
 
     public string ToBicepString(
-        string symbolicName, 
+        string symbolicName,
         string? overwriteNameParameter = null,
         string? parent = null,
         IEnumerable<string>? dependsOn = null)
     {
+        var locationString = !string.IsNullOrEmpty(Location) ? $"'{Location}'" : "location";
         var dependsOnString = dependsOn == null ? "[]" : "[\n    " + string.Join("\n    ", dependsOn) + "\n  ]";
         var identityString = Identity == null ? "null" : Identity.ToBicepString();
         var tagsString = Tags == null
@@ -28,7 +29,7 @@ public class HealthModel : IResourceType
         var template = $$"""
                          resource {{symbolicName}} '{{Type}}@{{ApiVersion}}' = {
                            name: {{overwriteNameParameter ?? $"'{Name}'"}}
-                           location: '{{Location}}'
+                           location: {{locationString}}
                            identity: {{identityString}}
                            tags: {{tagsString}}
                            properties: {}
