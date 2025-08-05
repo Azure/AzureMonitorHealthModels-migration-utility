@@ -64,12 +64,12 @@ public class BicepFileCreator
 
         var bicepBuilder = new StringBuilder();
         bicepBuilder.AppendLine($"param {resourceNameParameterName} string = '{v1HealthModel.name}'");
+        bicepBuilder.AppendLine($"param location string = '{location}'");
         bicepBuilder.AppendLine();
 
         var v2HealthModel = new Models.V2.HealthModel
         {
             Name = v1HealthModel.name,
-            Location = location,
             Identity = v1HealthModel.identity != null
                 ? new Models.V2.Identity
                 {
