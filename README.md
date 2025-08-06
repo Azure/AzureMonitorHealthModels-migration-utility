@@ -128,10 +128,10 @@ python python/health_model_converter.py convert azure -r /subscriptions/7ddfffd7
 cd AzureMonitorHealthModels-migration-utility
 
 # File-based conversion to Bicep (no dependencies needed)
-python python/health_model_converter.py convert file -i samples/martinovo-v1 -o samples/output
+python python/health_model_converter.py convert file -i samples/mymodel-v1 -o samples/output
 
 # File-based conversion to ARM template (requires az bicep)
-python python/health_model_converter.py convert file -i samples/martinovo-v1 -o samples/output --armtemplate
+python python/health_model_converter.py convert file -i samples/mymodel-v1 -o samples/output --armtemplate
 
 # Azure resource conversion to Bicep (requires Azure SDK)
 pip install -r python/requirements.txt
