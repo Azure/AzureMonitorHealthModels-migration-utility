@@ -1196,6 +1196,17 @@ Required packages for Azure conversion:
                 # Write ARM template file
                 if converter.write_output_file(arm_content, args.outputfolder, v1_model.name, ".json"):
                     logger.info(f"Health model '{v1_model.name}' converted to ARM template and written to output folder '{args.outputfolder}'")
+                    
+                    # Print deployment command
+                    output_file = Path(args.outputfolder) / f"{v1_model.name}.json"
+                    logger.info("")
+                    logger.info("To deploy this health model to Azure, run:")
+                    logger.info("")
+                    logger.info(f"  az deployment group create \\")
+                    logger.info(f"    --resource-group <YOUR_RESOURCE_GROUP> \\")
+                    logger.info(f"    --template-file \"{output_file}\" \\")
+                    logger.info(f"    --parameters resourceName=\"{v1_model.name}\" location=\"{SUPPORTED_V2_LOCATIONS[0]}\"")
+                    logger.info("")
                     return 0
                 else:
                     logger.error("Failed to write ARM template file")
@@ -1204,6 +1215,17 @@ Required packages for Azure conversion:
                 # Write Bicep file
                 if converter.write_output_file(bicep_content, args.outputfolder, v1_model.name, ".bicep"):
                     logger.info(f"Health model '{v1_model.name}' converted to Bicep and written to output folder '{args.outputfolder}'")
+                    
+                    # Print deployment command
+                    output_file = Path(args.outputfolder) / f"{v1_model.name}.bicep"
+                    logger.info("")
+                    logger.info("To deploy this health model to Azure, run:")
+                    logger.info("")
+                    logger.info(f"  az deployment group create \\")
+                    logger.info(f"    --resource-group <YOUR_RESOURCE_GROUP> \\")
+                    logger.info(f"    --template-file \"{output_file}\" \\")
+                    logger.info(f"    --parameters resourceName=\"{v1_model.name}\" location=\"{SUPPORTED_V2_LOCATIONS[0]}\"")
+                    logger.info("")
                     return 0
                 else:
                     logger.error("Failed to write Bicep file")
@@ -1258,6 +1280,17 @@ Required packages for Azure conversion:
                 # Write ARM template file
                 if converter.write_output_file(arm_content, args.outputfolder, v1_model.name, ".json"):
                     logger.info(f"Health model '{v1_model.name}' converted to ARM template and written to output folder '{args.outputfolder}'")
+                    
+                    # Print deployment command
+                    output_file = Path(args.outputfolder) / f"{v1_model.name}.json"
+                    logger.info("")
+                    logger.info("To deploy this health model to Azure, run:")
+                    logger.info("")
+                    logger.info(f"  az deployment group create \\")
+                    logger.info(f"    --resource-group <YOUR_RESOURCE_GROUP> \\")
+                    logger.info(f"    --template-file \"{output_file}\" \\")
+                    logger.info(f"    --parameters resourceName=\"{v1_model.name}\" location=\"{SUPPORTED_V2_LOCATIONS[0]}\"")
+                    logger.info("")
                     return 0
                 else:
                     logger.error("Failed to write ARM template file")
@@ -1266,6 +1299,17 @@ Required packages for Azure conversion:
                 # Write Bicep file
                 if converter.write_output_file(bicep_content, args.outputfolder, v1_model.name, ".bicep"):
                     logger.info(f"Health model '{v1_model.name}' converted to Bicep and written to output folder '{args.outputfolder}'")
+                    
+                    # Print deployment command
+                    output_file = Path(args.outputfolder) / f"{v1_model.name}.bicep"
+                    logger.info("")
+                    logger.info("To deploy this health model to Azure, run:")
+                    logger.info("")
+                    logger.info(f"  az deployment group create \\")
+                    logger.info(f"    --resource-group <YOUR_RESOURCE_GROUP> \\")
+                    logger.info(f"    --template-file \"{output_file}\" \\")
+                    logger.info(f"    --parameters resourceName=\"{v1_model.name}\" location=\"{SUPPORTED_V2_LOCATIONS[0]}\"")
+                    logger.info("")
                     return 0
                 else:
                     logger.error("Failed to write Bicep file")
