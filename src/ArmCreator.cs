@@ -30,11 +30,11 @@ public class ArmCreator
         HealthModelCollection collection = resourceGroupResource.GetHealthModels();
 
         var location = v1HealthModel.location.ToLower();
-        if (!Program.SupportedV2Locations.Contains(location))
+        if (!Utils.SupportedV2Locations.Contains(location))
         {
             logger.LogWarning("Location {location} is not supported in V2. Falling back to {fallbackLocation}",
-                location, Program.SupportedV2Locations.First());
-            location = Program.SupportedV2Locations.First();
+                location, Utils.SupportedV2Locations.First());
+            location = Utils.SupportedV2Locations.First();
         }
 
         HealthModelData data = new HealthModelData(new AzureLocation(location));

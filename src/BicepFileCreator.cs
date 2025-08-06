@@ -7,9 +7,14 @@ using Bicep.Core.Features;
 using Bicep.Core.FileSystem;
 using Bicep.Core.Registry;
 using Bicep.Core.Registry.Auth;
+using Bicep.Core.Registry.Catalog;
+using Bicep.Core.Registry.Catalog.Implementation.PublicRegistries;
 using Bicep.Core.Semantics.Namespaces;
+using Bicep.Core.SourceGraph;
 using Bicep.Core.TypeSystem.Providers;
 using Bicep.Core.Utils;
+using Bicep.IO.Abstraction;
+using Bicep.IO.FileSystem;
 using Microsoft.CloudHealth.PreviewMigration.Models.V2;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -52,374 +57,397 @@ public class BicepFileCreator
 
     private static string? ConvertToV2HealthModel(HealthModel v1HealthModel, ILogger logger)
     {
-        var location = v1HealthModel.location.ToLower();
-        if (!Program.SupportedV2Locations.Contains(location))
+        try
         {
-            logger.LogWarning("Location {location} is not supported in V2. Falling back to {fallbackLocation}",
-                location, Program.SupportedV2Locations.First());
-            location = Program.SupportedV2Locations.First();
-        }
-
-        var resourceNameParameterName = "resourceName";
-
-        var bicepBuilder = new StringBuilder();
-        bicepBuilder.AppendLine($"param {resourceNameParameterName} string = '{v1HealthModel.name}'");
-        bicepBuilder.AppendLine($"param location string = '{location}'");
-        bicepBuilder.AppendLine();
-
-        var v2HealthModel = new Models.V2.HealthModel
-        {
-            Name = v1HealthModel.name,
-            Identity = v1HealthModel.identity != null
-                ? new Models.V2.Identity
-                {
-                    Type = v1HealthModel.identity.type,
-                    UserAssignedIdentities = v1HealthModel.identity.userAssignedIdentities?.ToDictionary(kvp => kvp.Key,
-                        _ => new object())
-                }
-                : null,
-            Tags = v1HealthModel.tags,
-        };
-
-        var modelSymbolicName = "healthModel";
-
-        bicepBuilder.AppendLine(v2HealthModel.ToBicepString(modelSymbolicName, resourceNameParameterName));
-        bicepBuilder.AppendLine();
-
-        if (v1HealthModel.properties.nodes == null)
-        {
-            logger.LogWarning("No nodes found in v1 health model");
-            logger.LogInformation(bicepBuilder.ToString());
-            return null;
-        }
-
-        var allQueryIds = v1HealthModel.properties.nodes.SelectMany(n => n.queries?.Select(q => q.queryId) ?? []).ToList();
-        // check if no duplicates, else return. Should not happen, though.
-        if (allQueryIds.Count != allQueryIds.Distinct().Count())
-        {
-            logger.LogWarning("Duplicate queryIds found in v1 health model. Please ensure all queryIds are unique within the health model");
-            return null;
-        }
-
-        // Key: symbolic name, Value: object
-        var signalDefinitions = new Dictionary<string, SignalDefinition>();
-        var authenticationSettings = new Dictionary<string, AuthenticationSetting>();
-        var entities = new Dictionary<string, Entity>();
-        var relationships = new Dictionary<string, Relationship>();
-
-        if (v1HealthModel.identity != null)
-        {
-            if (v1HealthModel.identity.type.Contains("SystemAssigned", StringComparison.InvariantCultureIgnoreCase))
+            var location = v1HealthModel.location.ToLower();
+            if (!Utils.SupportedV2Locations.Contains(location))
             {
-                var authenticationSetting = new AuthenticationSetting
-                {
-                    Name = "SystemAssigned",
-                    Properties = new ManagedIdentityAuthenticationSettingProperties
-                    {
-                        DisplayName = "SystemAssigned",
-                        ManagedIdentityName = "SystemAssigned"
-                    }
-                };
-                var symbolicName = "authenticationSettingSystemAssigned";
-                authenticationSettings.Add(symbolicName, authenticationSetting);
-                bicepBuilder.AppendLine();
-                bicepBuilder.AppendLine(authenticationSetting.ToBicepString(symbolicName, parent: modelSymbolicName));
+                logger.LogWarning("Location {location} is not supported in V2. Falling back to {fallbackLocation}",
+                    location, Utils.SupportedV2Locations.First());
+                location = Utils.SupportedV2Locations.First();
             }
 
-            if (v1HealthModel.identity.userAssignedIdentities != null)
+            var resourceNameParameterName = "resourceName";
+
+            var bicepBuilder = new StringBuilder();
+            bicepBuilder.AppendLine($"param {resourceNameParameterName} string = '{v1HealthModel.name}'");
+            bicepBuilder.AppendLine($"param location string = '{location}'");
+            bicepBuilder.AppendLine();
+
+            var v2HealthModel = new Models.V2.HealthModel
             {
-                foreach (var userMi in v1HealthModel.identity.userAssignedIdentities)
+                Name = v1HealthModel.name,
+                Identity = v1HealthModel.identity != null
+                    ? new Models.V2.Identity
+                    {
+                        Type = v1HealthModel.identity.type,
+                        UserAssignedIdentities = v1HealthModel.identity.userAssignedIdentities?.ToDictionary(kvp => kvp.Key,
+                            _ => new object())
+                    }
+                    : null,
+                Tags = v1HealthModel.tags,
+            };
+
+            var modelSymbolicName = "healthModel";
+
+            bicepBuilder.AppendLine(v2HealthModel.ToBicepString(modelSymbolicName, resourceNameParameterName));
+            bicepBuilder.AppendLine();
+
+            if (v1HealthModel.properties.nodes == null)
+            {
+                logger.LogWarning("No nodes found in v1 health model");
+                logger.LogInformation(bicepBuilder.ToString());
+                return null;
+            }
+
+            var allQueryIds = v1HealthModel.properties.nodes.SelectMany(n => n.queries?.Select(q => q.queryId) ?? []).ToList();
+            // check if no duplicates, else return. Should not happen, though.
+            if (allQueryIds.Count != allQueryIds.Distinct().Count())
+            {
+                logger.LogWarning("Duplicate queryIds found in v1 health model. Please ensure all queryIds are unique within the health model");
+                return null;
+            }
+
+            // Key: symbolic name, Value: object
+            var signalDefinitions = new Dictionary<string, SignalDefinition>();
+            var authenticationSettings = new Dictionary<string, AuthenticationSetting>();
+            var entities = new Dictionary<string, Entity>();
+            var relationships = new Dictionary<string, Relationship>();
+
+            if (v1HealthModel.identity != null)
+            {
+                if (v1HealthModel.identity.type.Contains("SystemAssigned", StringComparison.InvariantCultureIgnoreCase))
                 {
-                    var userMiName = userMi.Key.Split('/').Last();
                     var authenticationSetting = new AuthenticationSetting
                     {
-                        Name = userMi.Key.GenerateDeterministicGuid().ToString(),
+                        Name = "SystemAssigned",
                         Properties = new ManagedIdentityAuthenticationSettingProperties
                         {
-                            DisplayName = userMiName,
-                            ManagedIdentityName = userMi.Key
+                            DisplayName = "SystemAssigned",
+                            ManagedIdentityName = "SystemAssigned"
                         }
                     };
-                    var symbolicName = "authenticationSettingUserMi" + authenticationSettings.Count;
+                    var symbolicName = "authenticationSettingSystemAssigned";
                     authenticationSettings.Add(symbolicName, authenticationSetting);
                     bicepBuilder.AppendLine();
                     bicepBuilder.AppendLine(authenticationSetting.ToBicepString(symbolicName, parent: modelSymbolicName));
                 }
-            }
-        }
 
-        foreach (var node in v1HealthModel.properties.nodes)
-        {
-            var queries = node.queries;
-            if (queries == null)
-                continue;
-
-            foreach (var query in queries)
-            {
-                if (query.dataType == "Text")
+                if (v1HealthModel.identity.userAssignedIdentities != null)
                 {
-                    logger.LogWarning(
-                        "Query {queryId} has unsupported data type '{dataType}'. Not migrating this query!",
-                        query.queryId,
-                        query.dataType);
-                    continue;
+                    foreach (var userMi in v1HealthModel.identity.userAssignedIdentities)
+                    {
+                        var userMiName = userMi.Key.Split('/').Last();
+                        var authenticationSetting = new AuthenticationSetting
+                        {
+                            Name = userMi.Key.GenerateDeterministicGuid().ToString(),
+                            Properties = new ManagedIdentityAuthenticationSettingProperties
+                            {
+                                DisplayName = userMiName,
+                                ManagedIdentityName = userMi.Key
+                            }
+                        };
+                        var symbolicName = "authenticationSettingUserMi" + authenticationSettings.Count;
+                        authenticationSettings.Add(symbolicName, authenticationSetting);
+                        bicepBuilder.AppendLine();
+                        bicepBuilder.AppendLine(authenticationSetting.ToBicepString(symbolicName, parent: modelSymbolicName));
+                    }
                 }
+            }
 
-                var signalDefinition = new SignalDefinition()
+            foreach (var node in v1HealthModel.properties.nodes)
+            {
+                var queries = node.queries;
+                if (queries == null)
+                    continue;
+
+                foreach (var query in queries)
                 {
-                    Name = query.queryId
-                };
-                if (query.queryType == "ResourceMetricsQuery")
-                {
-                    if (query.metricNamespace.Equals("microsoft.healthmodel/healthmodels", StringComparison.InvariantCultureIgnoreCase))
+                    if (query.dataType == "Text")
                     {
                         logger.LogWarning(
-                            "Query {queryId} for '{metricNamespace}' will not be migrated. Nested health models are handled differently!",
+                            "Query {queryId} has unsupported data type '{dataType}'. Not migrating this query!",
                             query.queryId,
-                            query.metricNamespace);
+                            query.dataType);
                         continue;
                     }
 
-                    var properties = new AzureResourceSignalDefinitionProperties
+                    var signalDefinition = new SignalDefinition()
                     {
-                        metricName = query.metricName,
-                        metricNamespace = query.metricNamespace,
-                        TimeGrain = query.timeGrain,
-                        aggregationType = query.aggregationType,
-                        DataUnit = query.dataUnit,
-                        dimensionFilter = query.dimensionFilter,
-                        dimension = query.dimension,
-                        EvaluationRules = new EvaluationRules
+                        Name = query.queryId
+                    };
+                    if (query.queryType == "ResourceMetricsQuery")
+                    {
+                        if (query.metricNamespace.Equals("microsoft.healthmodel/healthmodels", StringComparison.InvariantCultureIgnoreCase))
                         {
-                            UnhealthyRule = new StaticThreshold
+                            logger.LogWarning(
+                                "Query {queryId} for '{metricNamespace}' will not be migrated. Nested health models are handled differently!",
+                                query.queryId,
+                                query.metricNamespace);
+                            continue;
+                        }
+
+                        var properties = new AzureResourceSignalDefinitionProperties
+                        {
+                            metricName = query.metricName,
+                            metricNamespace = query.metricNamespace,
+                            TimeGrain = query.timeGrain,
+                            aggregationType = query.aggregationType,
+                            DataUnit = query.dataUnit,
+                            dimensionFilter = query.dimensionFilter,
+                            dimension = query.dimension,
+                            EvaluationRules = new EvaluationRules
                             {
-                                Operator = query.unhealthyOperator,
-                                Threshold = query.unhealthyThreshold
-                            },
-                            DegradedRule = new StaticThreshold
-                            {
-                                Operator = query.degradedOperator,
-                                Threshold = query.degradedThreshold
+                                UnhealthyRule = new StaticThreshold
+                                {
+                                    Operator = query.unhealthyOperator,
+                                    Threshold = query.unhealthyThreshold
+                                },
+                                DegradedRule = new StaticThreshold
+                                {
+                                    Operator = query.degradedOperator,
+                                    Threshold = query.degradedThreshold
+                                }
                             }
-                        }
-                    };
-                    signalDefinition.Properties = properties;
-                }
-                else if (query.queryType == "LogQuery")
-                {
-                    var properties = new LogAnalyticsSignalDefinitionProperties
+                        };
+                        signalDefinition.Properties = properties;
+                    }
+                    else if (query.queryType == "LogQuery")
                     {
-                        Name = query.name,
-                        QueryText = query.queryText,
-                        DataUnit = query.dataUnit,
-                        TimeGrain = query.timeGrain,
-                        ValueColumnName = query.valueColumnName,
-                        EvaluationRules = new EvaluationRules
+                        var properties = new LogAnalyticsSignalDefinitionProperties
                         {
-                            UnhealthyRule = new StaticThreshold
+                            Name = query.name,
+                            QueryText = query.queryText,
+                            DataUnit = query.dataUnit,
+                            TimeGrain = query.timeGrain,
+                            ValueColumnName = query.valueColumnName,
+                            EvaluationRules = new EvaluationRules
                             {
-                                Operator = query.unhealthyOperator,
-                                Threshold = query.unhealthyThreshold
-                            },
-                            DegradedRule = new StaticThreshold
-                            {
-                                Operator = query.degradedOperator,
-                                Threshold = query.degradedThreshold
+                                UnhealthyRule = new StaticThreshold
+                                {
+                                    Operator = query.unhealthyOperator,
+                                    Threshold = query.unhealthyThreshold
+                                },
+                                DegradedRule = new StaticThreshold
+                                {
+                                    Operator = query.degradedOperator,
+                                    Threshold = query.degradedThreshold
+                                }
                             }
-                        }
-                    };
-                    signalDefinition.Properties = properties;
-                }
-                else if (query.queryType == "PrometheusMetricsQuery")
-                {
-                    var properties = new PrometheusSignalDefinitionProperties
+                        };
+                        signalDefinition.Properties = properties;
+                    }
+                    else if (query.queryType == "PrometheusMetricsQuery")
                     {
-                        Name = query.name,
-                        QueryText = query.queryText,
-                        DataUnit = query.dataUnit,
-                        TimeGrain = query.timeGrain,
-                        EvaluationRules = new EvaluationRules
+                        var properties = new PrometheusSignalDefinitionProperties
                         {
-                            UnhealthyRule = new StaticThreshold
+                            Name = query.name,
+                            QueryText = query.queryText,
+                            DataUnit = query.dataUnit,
+                            TimeGrain = query.timeGrain,
+                            EvaluationRules = new EvaluationRules
                             {
-                                Operator = query.unhealthyOperator,
-                                Threshold = query.unhealthyThreshold
-                            },
-                            DegradedRule = new StaticThreshold
-                            {
-                                Operator = query.degradedOperator,
-                                Threshold = query.degradedThreshold
+                                UnhealthyRule = new StaticThreshold
+                                {
+                                    Operator = query.unhealthyOperator,
+                                    Threshold = query.unhealthyThreshold
+                                },
+                                DegradedRule = new StaticThreshold
+                                {
+                                    Operator = query.degradedOperator,
+                                    Threshold = query.degradedThreshold
+                                }
                             }
-                        }
-                    };
-                    signalDefinition.Properties = properties;
-                }
-
-                var symbolicName = $"sigDef{signalDefinitions.Count}";
-                signalDefinitions.Add(symbolicName, signalDefinition);
-
-                bicepBuilder.AppendLine();
-                bicepBuilder.AppendLine(signalDefinition.ToBicepString(symbolicName, parent: modelSymbolicName));
-            }
-        }
-
-        foreach (var node in v1HealthModel.properties.nodes)
-        {
-            // Special handling for root node
-            var isRoot = node.nodeId == "0";
-            var nodeName = isRoot ? v2HealthModel.Name : node.nodeId;
-
-            var entity = new Entity
-            {
-                Name = nodeName,
-                Properties = new EntityProperties
-                {
-                    DisplayName = node.name,
-                    Impact = node.impact,
-                    CanvasPosition = node.visual == null
-                        ? null
-                        : new CanvasPosition
-                        {
-                            X = node.visual.x,
-                            Y = node.visual.y
-                        }
-                }
-            };
-
-            var dependsOn = new List<string>();
-
-            KeyValuePair<string, AuthenticationSetting>? authenticationSetting = null;
-            var queries = node.queries?.Where(q => q.enabledState == "Enabled").ToList(); // Filter out any disabled queries, those will not be assigned
-            if (queries?.Count > 0)
-            {
-                authenticationSetting = authenticationSettings.FirstOrDefault(a =>
-                    a.Value.Properties.ManagedIdentityName.EndsWith(node.credentialId, StringComparison.InvariantCultureIgnoreCase));
-
-                var signalGroup = new SignalGroup();
-
-                var resourceMetricsQueries = queries
-                    .Where(q => q.queryType == "ResourceMetricsQuery")
-                    .ToList();
-                if (resourceMetricsQueries.Count != 0)
-                {
-                    signalGroup.AzureResource = new AzureResourceSignalGroup
-                    {
-                        AuthenticationSetting = authenticationSetting.Value.Value.Name,
-                        AzureResourceId = node.azureResourceId,
-                        SignalAssignments = new SignalAssignment
-                        {
-                            SignalDefinitions = resourceMetricsQueries
-                                .Where(q => !q.metricNamespace.Equals("microsoft.healthmodel/healthmodels",
-                                    StringComparison.InvariantCultureIgnoreCase))
-                                .Select(q => q.queryId).ToArray()
-                        }
-                    };
-
-                    // Special handling for nested health models
-                    if (node.azureResourceId.Contains("microsoft.healthmodel/healthmodels", StringComparison.InvariantCultureIgnoreCase))
-                    {
-                        signalGroup.AzureResource.AzureResourceId = node.azureResourceId.Replace(
-                            "microsoft.healthmodel/healthmodels", "Microsoft.CloudHealth/healthmodels", StringComparison.InvariantCultureIgnoreCase);
-                        logger.LogInformation(
-                            "Replacing 'microsoft.healthmodel/healthmodels' with 'Microsoft.Cloudhealth/healthmodels' in AzureResourceId for nested health model {nodeName}. Ensure that the nested health model is also being converted and resides in the same resource group as before!",
-                            nodeName);
+                        };
+                        signalDefinition.Properties = properties;
                     }
 
-                    var dependentQueries = resourceMetricsQueries
-                        .Where(q => !q.metricNamespace.Equals("microsoft.healthmodel/healthmodels",
-                            StringComparison.InvariantCultureIgnoreCase))
-                        .Select(q => signalDefinitions.First(kvp => kvp.Value.Name == q.queryId).Key);
-                    dependsOn.AddRange(dependentQueries);
+                    var symbolicName = $"sigDef{signalDefinitions.Count}";
+                    signalDefinitions.Add(symbolicName, signalDefinition);
+
+                    bicepBuilder.AppendLine();
+                    bicepBuilder.AppendLine(signalDefinition.ToBicepString(symbolicName, parent: modelSymbolicName));
                 }
+            }
 
-                // Filter out any queries that are of type LogQuery and have a data type of Text
-                var logAnalyticsQueries = queries.Where(q => q.queryType == "LogQuery").Where(q => q.dataType != "Text")
-                    .ToList();
-                if (logAnalyticsQueries.Count != 0)
+            foreach (var node in v1HealthModel.properties.nodes)
+            {
+                // Special handling for root node
+                var isRoot = node.nodeId == "0";
+                var nodeName = isRoot ? v2HealthModel.Name : node.nodeId;
+
+                var entity = new Entity
                 {
-                    signalGroup.AzureLogAnalytics = new LogAnalyticsSignalGroup
+                    Name = nodeName,
+                    Properties = new EntityProperties
                     {
-                        AuthenticationSetting = authenticationSetting.Value.Value.Name,
-                        LogAnalyticsWorkspaceResourceId = node.logAnalyticsResourceId,
-                        SignalAssignments = new SignalAssignment
-                        {
-                            SignalDefinitions = logAnalyticsQueries.Select(q => q.queryId).ToArray()
-                        }
-                    };
-
-                    dependsOn.AddRange(logAnalyticsQueries.Select(q =>
-                        signalDefinitions.First(kvp => kvp.Value.Name == q.queryId).Key));
-                }
-
-                var prometheusQueries = queries.Where(q => q.queryType == "PrometheusMetricsQuery").ToList();
-                if (prometheusQueries.Count != 0)
-                {
-                    signalGroup.AzureMonitorWorkspace = new AzureMonitorWorkspaceSignalGroup
-                    {
-                        AuthenticationSetting = authenticationSetting.Value.Value.Name,
-                        AzureMonitorWorkspaceResourceId = node.azureMonitorWorkspaceResourceId,
-                        SignalAssignments = new SignalAssignment
-                        {
-                            SignalDefinitions = prometheusQueries.Select(q => q.queryId).ToArray()
-                        }
-                    };
-
-                    dependsOn.AddRange(prometheusQueries.Select(q => signalDefinitions.First(kvp => kvp.Value.Name == q.queryId).Key));
-                }
-
-                entity.Properties.SignalGroup = signalGroup;
-            }
-
-            var symbolicName = $"entity{entities.Count}";
-            entities.Add(symbolicName, entity);
-
-            if (authenticationSetting != null)
-            {
-                dependsOn.Add(authenticationSetting.Value.Key);
-            }
-
-            bicepBuilder.AppendLine();
-            if (isRoot)
-            {
-                bicepBuilder.AppendLine(entity.ToBicepString(symbolicName, overwriteNameParameter: resourceNameParameterName, parent: modelSymbolicName, dependsOn: dependsOn));
-            }
-            else
-            {
-                bicepBuilder.AppendLine(entity.ToBicepString(symbolicName, parent: modelSymbolicName, dependsOn: dependsOn));
-            }
-        }
-
-        foreach (var node in v1HealthModel.properties.nodes)
-        {
-            var nodeName = node.nodeId == "0" ? v2HealthModel.Name : node.nodeId;
-            var childNodeIds = node.childNodeIds;
-            if (childNodeIds == null || childNodeIds.Length == 0)
-                continue;
-            foreach (var childNodeId in childNodeIds)
-            {
-                var relationship = new Relationship
-                {
-                    Name = $"{nodeName}-{childNodeId}".GenerateDeterministicGuid().ToString(),
-                    Properties = new RelationshipProperties
-                    {
-                        ParentEntityName = nodeName,
-                        ChildEntityName = childNodeId
+                        DisplayName = node.name,
+                        Impact = node.impact,
+                        CanvasPosition = node.visual == null
+                            ? null
+                            : new CanvasPosition
+                            {
+                                X = node.visual.x,
+                                Y = node.visual.y
+                            }
                     }
                 };
-                var symbolicName = $"relationship{relationships.Count}";
 
-                relationships.Add(symbolicName, relationship);
+                var dependsOn = new List<string>();
 
-                var parentEntitySymbolicName = entities.First(kvp => kvp.Value.Name == nodeName).Key;
-                var childEntitySymbolicName = entities.First(kvp => kvp.Value.Name == childNodeId).Key;
+                KeyValuePair<string, AuthenticationSetting>? authenticationSetting = null;
+                var queries = node.queries?.Where(q => q.enabledState == "Enabled").ToList(); // Filter out any disabled queries, those will not be assigned
+                if (queries?.Count > 0)
+                {
+                    authenticationSetting = authenticationSettings.FirstOrDefault(a =>
+                        a.Value.Properties.ManagedIdentityName.EndsWith(node.credentialId, StringComparison.InvariantCultureIgnoreCase));
+
+                    if (authenticationSetting?.Value == null)
+                    {
+                        logger.LogInformation("No authentication setting found for '{nodeId}'", node.credentialId);
+                        authenticationSetting = authenticationSettings.FirstOrDefault();
+                        if (authenticationSetting?.Value == null)
+                        {
+                            logger.LogError("No authentication setting found at all. Cannot convert!");
+                            return null;
+                        }
+                        else
+                        {
+                            logger.LogWarning("Using default authentication setting '{authSettingName}' for entity {nodeName}.", authenticationSetting.Value.Value.Name, nodeName);
+                        }
+                    }
+
+                    var signalGroup = new SignalGroup();
+
+                    var resourceMetricsQueries = queries
+                        .Where(q => q.queryType == "ResourceMetricsQuery")
+                        .ToList();
+                    if (resourceMetricsQueries.Count != 0)
+                    {
+                        signalGroup.AzureResource = new AzureResourceSignalGroup
+                        {
+                            AuthenticationSetting = authenticationSetting.Value.Value.Name,
+                            AzureResourceId = node.azureResourceId,
+                            SignalAssignments = new SignalAssignment
+                            {
+                                SignalDefinitions = resourceMetricsQueries
+                                    .Where(q => !q.metricNamespace.Equals("microsoft.healthmodel/healthmodels",
+                                        StringComparison.InvariantCultureIgnoreCase))
+                                    .Select(q => q.queryId).ToArray()
+                            }
+                        };
+
+                        // Special handling for nested health models
+                        if (node.azureResourceId.Contains("microsoft.healthmodel/healthmodels", StringComparison.InvariantCultureIgnoreCase))
+                        {
+                            signalGroup.AzureResource.AzureResourceId = node.azureResourceId.Replace(
+                                "microsoft.healthmodel/healthmodels", "Microsoft.CloudHealth/healthmodels", StringComparison.InvariantCultureIgnoreCase);
+                            logger.LogInformation(
+                                "Replacing 'microsoft.healthmodel/healthmodels' with 'Microsoft.Cloudhealth/healthmodels' in AzureResourceId for nested health model {nodeName}. Ensure that the nested health model is also being converted and resides in the same resource group as before!",
+                                nodeName);
+                        }
+
+                        var dependentQueries = resourceMetricsQueries
+                            .Where(q => !q.metricNamespace.Equals("microsoft.healthmodel/healthmodels",
+                                StringComparison.InvariantCultureIgnoreCase))
+                            .Select(q => signalDefinitions.First(kvp => kvp.Value.Name == q.queryId).Key);
+                        dependsOn.AddRange(dependentQueries);
+                    }
+
+                    // Filter out any queries that are of type LogQuery and have a data type of Text
+                    var logAnalyticsQueries = queries.Where(q => q.queryType == "LogQuery").Where(q => q.dataType != "Text")
+                        .ToList();
+                    if (logAnalyticsQueries.Count != 0)
+                    {
+                        signalGroup.AzureLogAnalytics = new LogAnalyticsSignalGroup
+                        {
+                            AuthenticationSetting = authenticationSetting.Value.Value.Name,
+                            LogAnalyticsWorkspaceResourceId = node.logAnalyticsResourceId,
+                            SignalAssignments = new SignalAssignment
+                            {
+                                SignalDefinitions = logAnalyticsQueries.Select(q => q.queryId).ToArray()
+                            }
+                        };
+
+                        dependsOn.AddRange(logAnalyticsQueries.Select(q =>
+                            signalDefinitions.First(kvp => kvp.Value.Name == q.queryId).Key));
+                    }
+
+                    var prometheusQueries = queries.Where(q => q.queryType == "PrometheusMetricsQuery").ToList();
+                    if (prometheusQueries.Count != 0)
+                    {
+                        signalGroup.AzureMonitorWorkspace = new AzureMonitorWorkspaceSignalGroup
+                        {
+                            AuthenticationSetting = authenticationSetting.Value.Value.Name,
+                            AzureMonitorWorkspaceResourceId = node.azureMonitorWorkspaceResourceId,
+                            SignalAssignments = new SignalAssignment
+                            {
+                                SignalDefinitions = prometheusQueries.Select(q => q.queryId).ToArray()
+                            }
+                        };
+
+                        dependsOn.AddRange(prometheusQueries.Select(q => signalDefinitions.First(kvp => kvp.Value.Name == q.queryId).Key));
+                    }
+
+                    entity.Properties.SignalGroup = signalGroup;
+                }
+
+                var symbolicName = $"entity{entities.Count}";
+                entities.Add(symbolicName, entity);
+
+                if (authenticationSetting != null)
+                {
+                    dependsOn.Add(authenticationSetting.Value.Key);
+                }
 
                 bicepBuilder.AppendLine();
-                bicepBuilder.AppendLine(relationship.ToBicepString(symbolicName, parent: modelSymbolicName,
-                    dependsOn: [parentEntitySymbolicName, childEntitySymbolicName]));
+                if (isRoot)
+                {
+                    bicepBuilder.AppendLine(entity.ToBicepString(symbolicName, overwriteNameParameter: resourceNameParameterName, parent: modelSymbolicName, dependsOn: dependsOn));
+                }
+                else
+                {
+                    bicepBuilder.AppendLine(entity.ToBicepString(symbolicName, parent: modelSymbolicName, dependsOn: dependsOn));
+                }
             }
-        }
 
-        return bicepBuilder.ToString();
+            foreach (var node in v1HealthModel.properties.nodes)
+            {
+                var nodeName = node.nodeId == "0" ? v2HealthModel.Name : node.nodeId;
+                var childNodeIds = node.childNodeIds;
+                if (childNodeIds == null || childNodeIds.Length == 0)
+                    continue;
+                foreach (var childNodeId in childNodeIds)
+                {
+                    var relationship = new Relationship
+                    {
+                        Name = $"{nodeName}-{childNodeId}".GenerateDeterministicGuid().ToString(),
+                        Properties = new RelationshipProperties
+                        {
+                            ParentEntityName = nodeName,
+                            ChildEntityName = childNodeId
+                        }
+                    };
+                    var symbolicName = $"relationship{relationships.Count}";
+
+                    relationships.Add(symbolicName, relationship);
+
+                    var parentEntitySymbolicName = entities.First(kvp => kvp.Value.Name == nodeName).Key;
+                    var childEntitySymbolicName = entities.First(kvp => kvp.Value.Name == childNodeId).Key;
+
+                    bicepBuilder.AppendLine();
+                    bicepBuilder.AppendLine(relationship.ToBicepString(symbolicName, parent: modelSymbolicName,
+                        dependsOn: [parentEntitySymbolicName, childEntitySymbolicName]));
+                }
+            }
+
+            return bicepBuilder.ToString();
+        }
+        catch (Exception e)
+        {
+            logger.LogError(e, "Failed to convert v1 health model {healthModelName} to v2 Bicep file", v1HealthModel.name);
+            return null;
+        }
     }
 
     /// <summary>
@@ -435,7 +463,7 @@ public class BicepFileCreator
         var host = Host.CreateDefaultBuilder().ConfigureServices(services =>
         {
             services.AddSingleton<IFileSystem, FileSystem>();
-            services.AddSingleton<INamespaceProvider, DefaultNamespaceProvider>();
+            services.AddSingleton<INamespaceProvider, NamespaceProvider>();
             services.AddSingleton<IResourceTypeProviderFactory, ResourceTypeProviderFactory>();
             services.AddSingleton<IContainerRegistryClientFactory, ContainerRegistryClientFactory>();
             services.AddSingleton<ITemplateSpecRepositoryFactory, TemplateSpecRepositoryFactory>();
@@ -443,6 +471,12 @@ public class BicepFileCreator
             services.AddSingleton<IArtifactRegistryProvider, DefaultArtifactRegistryProvider>();
             services.AddSingleton<ITokenCredentialFactory, TokenCredentialFactory>();
             services.AddSingleton<IFileResolver, FileResolver>();
+            services.AddSingleton<IFileExplorer, FileSystemFileExplorer>();
+            services.AddSingleton<ISourceFileFactory, SourceFileFactory>();
+            services.AddSingleton<IAuxiliaryFileCache, AuxiliaryFileCache>();
+            services.AddSingleton<IPublicModuleMetadataProvider, PublicModuleMetadataProvider>();
+            services.AddSingleton<IPublicModuleIndexHttpClient, PublicModuleMetadataHttpClient>();
+            services.AddHttpClient<PublicModuleMetadataHttpClient>();
             services.AddSingleton<IEnvironment, Bicep.Core.Utils.Environment>();
             services
                 .AddSingleton<Bicep.Core.Configuration.IConfigurationManager,
