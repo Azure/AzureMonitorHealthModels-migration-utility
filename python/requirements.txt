@@ -1,0 +1,6 @@
+# Azure SDK dependencies for Azure resource conversion (optional)
+azure-identity>=1.15.0
+requests>=2.31.0
+
+# Note: These dependencies are only required if you want to use the Azure resource conversion feature.
+# For file-based conversion only, no external dependencies are needed.

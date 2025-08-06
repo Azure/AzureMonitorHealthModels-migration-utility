@@ -4,8 +4,21 @@ This is a simple tool to convert a Azure Monitor health models **Private Preview
 
 ## Prerequisites
 
+### Option 1: .NET Implementation (Windows only)
+
 - .NET 8 runtime installed
-- Utility tool binaries downloaded from the **Releases** section of this GitHub repository.
+- Utility tool binaries downloaded from the **Releases** section of this GitHub repository
+
+### Option 2: Python Implementation (Cross-platform)
+
+- Python 3.7+ installed
+- (Optional) Azure SDK dependencies for Azure resource conversion:
+
+  ```bash
+  pip install -r python/requirements.txt
+  ```
+
+  Note: Azure SDK is only required for direct Azure resource conversion. File-based conversion works without any dependencies.
 
 ## Remarks
 
@@ -14,23 +27,43 @@ This is a simple tool to convert a Azure Monitor health models **Private Preview
 
 ## Usage
 
-The migration utility has two modes:
+The migration utility is available in two implementations:
 
-- File input
-- Load private preview configuration directly from Azure
+- **C#/.NET** (Windows only)
+- **Python** (Cross-platform: Windows, macOS, Linux)
+
+Both implementations support two modes:
+
+- **File input** - Convert from exported JSON file (no Azure connection required)
+- **Azure direct** - Load private preview configuration directly from Azure
+
+Both implementations produce identical output.
 
 ### File input
 
 This method allows to convert a model configuration after it has been manually exported from Azure and stored in a file. The tool will not require any connection/permission to Azure.
 
 - Fetch the health model configuration from the Azure portal:
-![get resource json](./docs/ahm_v1_json.png)
+
+  ![get resource json](./docs/ahm_v1_json.png)
 
 - Copy the entire JSON definition and store it in a local file, e.g. under **/tmp/v1_input.json**
-![resource json](./docs/ahm_v1_resource.png)
+
+  ![resource json](./docs/ahm_v1_resource.png)
+
+#### Using .NET tool (Windows only):
 
 ```bash
 Microsoft.CloudHealth.PreviewMigration.exe convert file --inputfile /tmp/v1_input.json --outputfolder /tmp
+```
+
+#### Using Python (Cross-platform):
+
+```bash
+python python/health_model_converter.py convert file -i /tmp/v1_input.json -o /tmp
+
+# Or with long arguments:
+python python/health_model_converter.py convert file --inputfile /tmp/v1_input.json --outputfolder /tmp
 ```
 
 ### Load private preview configuration from Azure
@@ -39,19 +72,73 @@ This method will attempt to fetch the health model directly from Azure, using on
 
 - Get the resource id of the health model resource
 
+#### Using .NET tool (Windows only):
+
 ```bash
 Microsoft.CloudHealth.PreviewMigration.exe convert azure --resourceId /subscriptions/7ddfffd7-abcd-40df-b352-828cbd55d6f4/resourceGroups/demo-rg/providers/Microsoft.HealthModel/healthmodels/my-model --outputfolder /tmp --armtemplate
 ```
 
 You can see the optional switch `--armtemplate` which will output a compiled ARM template instead of a Bicep file.
 
-### Deploy new resource to Azure
+#### Using Python (Cross-platform):
+
+```bash
+# First, ensure you're authenticated with Azure
+az login
+
+# Install Azure dependencies (only needed once)
+pip install -r python/requirements.txt
+
+# Run the conversion
+python python/health_model_converter.py convert azure -r /subscriptions/7ddfffd7-abcd-40df-b352-828cbd55d6f4/resourceGroups/demo-rg/providers/Microsoft.HealthModel/healthmodels/my-model -o /tmp
+
+# Or with long arguments:
+python python/health_model_converter.py convert azure --resource-id /subscriptions/7ddfffd7-abcd-40df-b352-828cbd55d6f4/resourceGroups/demo-rg/providers/Microsoft.HealthModel/healthmodels/my-model --outputfolder /tmp
+```
+
+Note: The Python implementation outputs Bicep files only. To generate ARM templates, use the Azure CLI:
+
+```bash
+az bicep build --file <generated-bicep-file>
+```
+
+## Python Script Examples
+
+### Quick Start
+
+```bash
+# Navigate to the repository
+cd AzureMonitorHealthModels-migration-utility
+
+# File-based conversion (no dependencies needed)
+python python/health_model_converter.py convert file -i samples/martinovo-v1 -o samples/output
+
+# Azure resource conversion (requires Azure SDK)
+pip install -r python/requirements.txt
+az login
+python python/health_model_converter.py convert azure -r "/subscriptions/.../providers/Microsoft.HealthModel/healthmodels/mymodel" -o samples/output
+```
+
+### Help and Usage Information
+
+```bash
+# Show general help
+python python/health_model_converter.py --help
+
+# Show help for file conversion
+python python/health_model_converter.py convert file --help
+
+# Show help for Azure conversion
+python python/health_model_converter.py convert azure --help
+```
+
+## Deploy new resource to Azure
 
 After you executed the commands above, in your specified output folder you will find a Bicep or ARM template file. You can use that to directly deploy a new health model resource to Azure:
 
-#### Deploy via CLI
+### Deploy via CLI
 
-If you have the Azure CLI installed, you can start the deployment like this
+If you have the Azure CLI installed, you can start the deployment like this:
 
 ```bash
 az account set --subscription <target subscription id>
@@ -60,15 +147,23 @@ az deployment group create --resource-group <your target resource group> --templ
 
 You can overwrite the default parameters for resource name and location using the `--parameters` argument.
 
-#### Deploy via Azure Portal
+### Deploy via Azure Portal
 
 > This requires that you have run the migration tool with the `--armtemplate` switch. Or you manually run `az bicep build --file <generated bicep file>`
 
-1) In the search box on top of the Portal type **deploy a custom template** ![deploy](./docs/portal_deploy.png)
-1) Click on **Build your own template in the editor**
-1) Click on **Load file** and select your generated ARM template JSON file. ![editor](./docs/edit_template.png)
-1) Click on Save.
-1) Validate the parameters, click on **Review + Create** and start the deployment.
+1. In the search box on top of the Portal type **deploy a custom template**
+
+   ![deploy](./docs/portal_deploy.png)
+
+2. Click on **Build your own template in the editor**
+
+3. Click on **Load file** and select your generated ARM template JSON file.
+
+   ![editor](./docs/edit_template.png)
+
+4. Click on Save.
+
+5. Validate the parameters, click on **Review + Create** and start the deployment.
 
 ## Trademarks
 
