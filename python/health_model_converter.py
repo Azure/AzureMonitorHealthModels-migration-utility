@@ -11,6 +11,8 @@ import logging
 import os
 import sys
 import re
+import subprocess
+import tempfile
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Any, Tuple
 from pathlib import Path
@@ -932,25 +934,94 @@ class HealthModelConverter:
             properties=properties
         )
     
-    def write_bicep_file(self, bicep_content: str, output_folder: str, model_name: str) -> bool:
-        """Write Bicep content to file."""
+    def write_output_file(self, content: str, output_folder: str, model_name: str, extension: str = ".bicep") -> bool:
+        """Write content to file with specified extension."""
         try:
             # Create output directory if it doesn't exist
             Path(output_folder).mkdir(parents=True, exist_ok=True)
             
             # Generate output file path
-            output_file = Path(output_folder) / f"{model_name}.bicep"
+            output_file = Path(output_folder) / f"{model_name}{extension}"
             
             # Write the file
             self.logger.info(f"Writing result to output file '{output_file}'...")
             with open(output_file, 'w') as f:
-                f.write(bicep_content)
+                f.write(content)
             
             return True
             
         except Exception as e:
-            self.logger.error(f"Failed to write Bicep file: {str(e)}")
+            self.logger.error(f"Failed to write output file: {str(e)}")
             return False
+    
+    def check_bicep_availability(self) -> bool:
+        """Check if az bicep build command is available."""
+        try:
+            # Check if az CLI is installed
+            result = subprocess.run(["az", "--version"], capture_output=True, text=True, check=False)
+            if result.returncode != 0:
+                self.logger.error("Azure CLI is not installed or not in PATH")
+                return False
+            
+            # Check if bicep is available
+            result = subprocess.run(["az", "bicep", "version"], capture_output=True, text=True, check=False)
+            if result.returncode != 0:
+                self.logger.error("Bicep is not installed. Please run: az bicep install")
+                return False
+            
+            self.logger.debug(f"Bicep version: {result.stdout.strip()}")
+            return True
+            
+        except FileNotFoundError:
+            self.logger.error("Azure CLI is not installed or not in PATH")
+            return False
+        except Exception as e:
+            self.logger.error(f"Error checking Bicep availability: {str(e)}")
+            return False
+    
+    def compile_bicep_to_arm(self, bicep_content: str, model_name: str) -> Optional[str]:
+        """Compile Bicep content to ARM template using az bicep build."""
+        try:
+            # Create temporary Bicep file
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.bicep', delete=False) as temp_bicep:
+                temp_bicep.write(bicep_content)
+                temp_bicep_path = temp_bicep.name
+            
+            # Create temporary output file path
+            temp_arm_path = temp_bicep_path.replace('.bicep', '.json')
+            
+            try:
+                # Compile Bicep to ARM template
+                self.logger.info(f"Compiling Bicep to ARM template for '{model_name}'...")
+                result = subprocess.run(
+                    ["az", "bicep", "build", "--file", temp_bicep_path, "--outfile", temp_arm_path],
+                    capture_output=True,
+                    text=True,
+                    check=False
+                )
+                
+                if result.returncode != 0:
+                    self.logger.error(f"Failed to compile Bicep to ARM template: {result.stderr}")
+                    return None
+                
+                # Read the compiled ARM template
+                with open(temp_arm_path, 'r') as f:
+                    arm_content = f.read()
+                
+                return arm_content
+                
+            finally:
+                # Clean up temporary files
+                try:
+                    os.unlink(temp_bicep_path)
+                    if os.path.exists(temp_arm_path):
+                        os.unlink(temp_arm_path)
+                except:
+                    pass
+                    
+        except Exception as e:
+            self.logger.error(f"Failed to compile Bicep to ARM template: {str(e)}")
+            return None
     
     def fetch_from_azure(self, resource_id: str) -> Optional[V1HealthModel]:
         """Fetch V1 health model from Azure using resource ID."""
@@ -1017,7 +1088,9 @@ def main():
 Examples:
   %(prog)s convert file -i model.json -o ./output
   %(prog)s convert file --inputfile model.json --outputfolder ./output
+  %(prog)s convert file -i model.json -o ./output --armtemplate
   %(prog)s convert azure -r "/subscriptions/.../providers/Microsoft.HealthModel/healthmodels/mymodel" -o ./output
+  %(prog)s convert azure -r "/subscriptions/.../providers/Microsoft.HealthModel/healthmodels/mymodel" -o ./output --armtemplate
   
 Azure authentication:
   For Azure conversion, ensure you are authenticated using one of:
@@ -1048,6 +1121,11 @@ Required packages for Azure conversion:
         required=True,
         help='Output folder path for generated Bicep file'
     )
+    file_parser.add_argument(
+        '--armtemplate',
+        action='store_true',
+        help='Compile the Bicep output to ARM template JSON (requires az bicep)'
+    )
     
     # Azure-based conversion
     azure_parser = convert_subparsers.add_parser('azure', help='Convert from Azure resource')
@@ -1060,6 +1138,11 @@ Required packages for Azure conversion:
         '-o', '--outputfolder',
         required=True,
         help='Output folder path for generated Bicep file'
+    )
+    azure_parser.add_argument(
+        '--armtemplate',
+        action='store_true',
+        help='Compile the Bicep output to ARM template JSON (requires az bicep)'
     )
     
     args = parser.parse_args()
@@ -1097,13 +1180,34 @@ Required packages for Azure conversion:
                 logger.error("Failed to convert health model to Bicep")
                 return 1
             
-            # Write output file
-            if converter.write_bicep_file(bicep_content, args.outputfolder, v1_model.name):
-                logger.info(f"Health model '{v1_model.name}' converted and written to output folder '{args.outputfolder}'")
-                return 0
+            # Handle ARM template compilation if requested
+            if args.armtemplate:
+                # Check Bicep availability
+                if not converter.check_bicep_availability():
+                    logger.error("Cannot compile to ARM template. Please install Bicep by running: az bicep install")
+                    return 1
+                
+                # Compile to ARM template
+                arm_content = converter.compile_bicep_to_arm(bicep_content, v1_model.name)
+                if not arm_content:
+                    logger.error("Failed to compile Bicep to ARM template")
+                    return 1
+                
+                # Write ARM template file
+                if converter.write_output_file(arm_content, args.outputfolder, v1_model.name, ".json"):
+                    logger.info(f"Health model '{v1_model.name}' converted to ARM template and written to output folder '{args.outputfolder}'")
+                    return 0
+                else:
+                    logger.error("Failed to write ARM template file")
+                    return 1
             else:
-                logger.error("Failed to write output file")
-                return 1
+                # Write Bicep file
+                if converter.write_output_file(bicep_content, args.outputfolder, v1_model.name, ".bicep"):
+                    logger.info(f"Health model '{v1_model.name}' converted to Bicep and written to output folder '{args.outputfolder}'")
+                    return 0
+                else:
+                    logger.error("Failed to write Bicep file")
+                    return 1
         
         elif args.source == 'azure':
             # Check if Azure SDK is available
@@ -1138,13 +1242,34 @@ Required packages for Azure conversion:
                 logger.error("Failed to convert health model to Bicep")
                 return 1
             
-            # Write output file
-            if converter.write_bicep_file(bicep_content, args.outputfolder, v1_model.name):
-                logger.info(f"Health model '{v1_model.name}' converted and written to output folder '{args.outputfolder}'")
-                return 0
+            # Handle ARM template compilation if requested
+            if args.armtemplate:
+                # Check Bicep availability
+                if not converter.check_bicep_availability():
+                    logger.error("Cannot compile to ARM template. Please install Bicep by running: az bicep install")
+                    return 1
+                
+                # Compile to ARM template
+                arm_content = converter.compile_bicep_to_arm(bicep_content, v1_model.name)
+                if not arm_content:
+                    logger.error("Failed to compile Bicep to ARM template")
+                    return 1
+                
+                # Write ARM template file
+                if converter.write_output_file(arm_content, args.outputfolder, v1_model.name, ".json"):
+                    logger.info(f"Health model '{v1_model.name}' converted to ARM template and written to output folder '{args.outputfolder}'")
+                    return 0
+                else:
+                    logger.error("Failed to write ARM template file")
+                    return 1
             else:
-                logger.error("Failed to write output file")
-                return 1
+                # Write Bicep file
+                if converter.write_output_file(bicep_content, args.outputfolder, v1_model.name, ".bicep"):
+                    logger.info(f"Health model '{v1_model.name}' converted to Bicep and written to output folder '{args.outputfolder}'")
+                    return 0
+                else:
+                    logger.error("Failed to write Bicep file")
+                    return 1
     
     else:
         parser.print_help()

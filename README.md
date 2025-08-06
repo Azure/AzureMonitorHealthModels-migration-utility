@@ -20,6 +20,18 @@ This is a simple tool to convert a Azure Monitor health models **Private Preview
 
   Note: Azure SDK is only required for direct Azure resource conversion. File-based conversion works without any dependencies.
 
+- (Optional) Azure CLI with Bicep for ARM template generation:
+
+  ```bash
+  # Install Azure CLI (if not already installed)
+  # See: https://docs.microsoft.com/azure/azure-cli/install-azure-cli
+  
+  # Install Bicep
+  az bicep install
+  ```
+
+  Note: Bicep is only required if you want to use the `--armtemplate` switch to generate ARM templates instead of Bicep files.
+
 ## Remarks
 
 - The public preview is not available in all the same Azure locations as the private preview version. The migration tool will thus default to another location if your former location is currently not yet supported.
@@ -54,16 +66,25 @@ This method allows to convert a model configuration after it has been manually e
 #### Using .NET tool (Windows only):
 
 ```bash
+# Generate Bicep file (default)
 Microsoft.CloudHealth.PreviewMigration.exe convert file --inputfile /tmp/v1_input.json --outputfolder /tmp
+
+# Generate ARM template
+Microsoft.CloudHealth.PreviewMigration.exe convert file --inputfile /tmp/v1_input.json --outputfolder /tmp --armtemplate
 ```
 
 #### Using Python (Cross-platform):
 
 ```bash
+# Generate Bicep file (default)
 python python/health_model_converter.py convert file -i /tmp/v1_input.json -o /tmp
+
+# Generate ARM template (requires az bicep)
+python python/health_model_converter.py convert file -i /tmp/v1_input.json -o /tmp --armtemplate
 
 # Or with long arguments:
 python python/health_model_converter.py convert file --inputfile /tmp/v1_input.json --outputfolder /tmp
+python python/health_model_converter.py convert file --inputfile /tmp/v1_input.json --outputfolder /tmp --armtemplate
 ```
 
 ### Load private preview configuration from Azure
@@ -75,10 +96,12 @@ This method will attempt to fetch the health model directly from Azure, using on
 #### Using .NET tool (Windows only):
 
 ```bash
+# Generate Bicep file (default)
+Microsoft.CloudHealth.PreviewMigration.exe convert azure --resourceId /subscriptions/7ddfffd7-abcd-40df-b352-828cbd55d6f4/resourceGroups/demo-rg/providers/Microsoft.HealthModel/healthmodels/my-model --outputfolder /tmp
+
+# Generate ARM template
 Microsoft.CloudHealth.PreviewMigration.exe convert azure --resourceId /subscriptions/7ddfffd7-abcd-40df-b352-828cbd55d6f4/resourceGroups/demo-rg/providers/Microsoft.HealthModel/healthmodels/my-model --outputfolder /tmp --armtemplate
 ```
-
-You can see the optional switch `--armtemplate` which will output a compiled ARM template instead of a Bicep file.
 
 #### Using Python (Cross-platform):
 
@@ -89,17 +112,11 @@ az login
 # Install Azure dependencies (only needed once)
 pip install -r python/requirements.txt
 
-# Run the conversion
+# Generate Bicep file (default)
 python python/health_model_converter.py convert azure -r /subscriptions/7ddfffd7-abcd-40df-b352-828cbd55d6f4/resourceGroups/demo-rg/providers/Microsoft.HealthModel/healthmodels/my-model -o /tmp
 
-# Or with long arguments:
-python python/health_model_converter.py convert azure --resource-id /subscriptions/7ddfffd7-abcd-40df-b352-828cbd55d6f4/resourceGroups/demo-rg/providers/Microsoft.HealthModel/healthmodels/my-model --outputfolder /tmp
-```
-
-Note: The Python implementation outputs Bicep files only. To generate ARM templates, use the Azure CLI:
-
-```bash
-az bicep build --file <generated-bicep-file>
+# Generate ARM template (requires az bicep)
+python python/health_model_converter.py convert azure -r /subscriptions/7ddfffd7-abcd-40df-b352-828cbd55d6f4/resourceGroups/demo-rg/providers/Microsoft.HealthModel/healthmodels/my-model -o /tmp --armtemplate
 ```
 
 ## Python Script Examples
@@ -110,13 +127,19 @@ az bicep build --file <generated-bicep-file>
 # Navigate to the repository
 cd AzureMonitorHealthModels-migration-utility
 
-# File-based conversion (no dependencies needed)
+# File-based conversion to Bicep (no dependencies needed)
 python python/health_model_converter.py convert file -i samples/martinovo-v1 -o samples/output
 
-# Azure resource conversion (requires Azure SDK)
+# File-based conversion to ARM template (requires az bicep)
+python python/health_model_converter.py convert file -i samples/martinovo-v1 -o samples/output --armtemplate
+
+# Azure resource conversion to Bicep (requires Azure SDK)
 pip install -r python/requirements.txt
 az login
 python python/health_model_converter.py convert azure -r "/subscriptions/.../providers/Microsoft.HealthModel/healthmodels/mymodel" -o samples/output
+
+# Azure resource conversion to ARM template (requires Azure SDK and az bicep)
+python python/health_model_converter.py convert azure -r "/subscriptions/.../providers/Microsoft.HealthModel/healthmodels/mymodel" -o samples/output --armtemplate
 ```
 
 ### Help and Usage Information
@@ -136,6 +159,13 @@ python python/health_model_converter.py convert azure --help
 
 After you executed the commands above, in your specified output folder you will find a Bicep or ARM template file. You can use that to directly deploy a new health model resource to Azure:
 
+### Output Formats
+
+Both tools support two output formats:
+
+- **Bicep files** (`.bicep`) - Default output format, human-readable and maintainable
+- **ARM templates** (`.json`) - Generated using the `--armtemplate` switch, ready for deployment via Azure Portal
+
 ### Deploy via CLI
 
 If you have the Azure CLI installed, you can start the deployment like this:
@@ -149,7 +179,7 @@ You can overwrite the default parameters for resource name and location using th
 
 ### Deploy via Azure Portal
 
-> This requires that you have run the migration tool with the `--armtemplate` switch. Or you manually run `az bicep build --file <generated bicep file>`
+> This requires that you have run the migration tool with the `--armtemplate` switch. Or you can manually convert a Bicep file: `az bicep build --file <generated bicep file>`
 
 1. In the search box on top of the Portal type **deploy a custom template**
 
