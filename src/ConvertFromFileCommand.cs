@@ -54,5 +54,5 @@ public class ConvertFromFileCommand : AsyncCommand<ConvertFromFileSettings>
 public class ConvertFromFileSettings : Program.ConvertSettings
 {
     [CommandOption("-i|--inputfile <inputFilePath>")]
-    public string InputFilePath { get; set; }
+    public required string InputFilePath { get; set; }
 }

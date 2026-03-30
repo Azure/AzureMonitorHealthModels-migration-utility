@@ -24,7 +24,7 @@ public static class Program
     public class ConvertSettings : CommandSettings
     {
         [CommandOption("-o|--outputfolder <outputFolderPath>")]
-        public string OutputFolder { get; init; }
+        public required string OutputFolder { get; init; }
 
         [CommandOption("--armtemplate")]
         [DefaultValue(false)]

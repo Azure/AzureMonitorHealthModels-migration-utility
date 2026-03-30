@@ -100,16 +100,7 @@ public class BicepFileCreator
                 return null;
             }
 
-            var allQueryIds = v1HealthModel.properties.nodes.SelectMany(n => n.queries?.Select(q => q.queryId) ?? []).ToList();
-            // check if no duplicates, else return. Should not happen, though.
-            if (allQueryIds.Count != allQueryIds.Distinct().Count())
-            {
-                logger.LogWarning("Duplicate queryIds found in v1 health model. Please ensure all queryIds are unique within the health model");
-                return null;
-            }
-
             // Key: symbolic name, Value: object
-            var signalDefinitions = new Dictionary<string, SignalDefinition>();
             var authenticationSettings = new Dictionary<string, AuthenticationSetting>();
             var entities = new Dictionary<string, Entity>();
             var relationships = new Dictionary<string, Relationship>();
@@ -157,121 +148,6 @@ public class BicepFileCreator
 
             foreach (var node in v1HealthModel.properties.nodes)
             {
-                var queries = node.queries;
-                if (queries == null)
-                    continue;
-
-                foreach (var query in queries)
-                {
-                    if (query.dataType == "Text")
-                    {
-                        logger.LogWarning(
-                            "Query {queryId} has unsupported data type '{dataType}'. Not migrating this query!",
-                            query.queryId,
-                            query.dataType);
-                        continue;
-                    }
-
-                    var signalDefinition = new SignalDefinition()
-                    {
-                        Name = query.queryId
-                    };
-                    if (query.queryType == "ResourceMetricsQuery")
-                    {
-                        if (query.metricNamespace.Equals("microsoft.healthmodel/healthmodels", StringComparison.InvariantCultureIgnoreCase))
-                        {
-                            logger.LogWarning(
-                                "Query {queryId} for '{metricNamespace}' will not be migrated. Nested health models are handled differently!",
-                                query.queryId,
-                                query.metricNamespace);
-                            continue;
-                        }
-
-                        var properties = new AzureResourceSignalDefinitionProperties
-                        {
-                            metricName = query.metricName,
-                            metricNamespace = query.metricNamespace,
-                            TimeGrain = query.timeGrain,
-                            aggregationType = query.aggregationType,
-                            DataUnit = query.dataUnit,
-                            dimensionFilter = query.dimensionFilter,
-                            dimension = query.dimension,
-                            EvaluationRules = new EvaluationRules
-                            {
-                                UnhealthyRule = new StaticThreshold
-                                {
-                                    Operator = query.unhealthyOperator,
-                                    Threshold = query.unhealthyThreshold
-                                },
-                                DegradedRule = new StaticThreshold
-                                {
-                                    Operator = query.degradedOperator,
-                                    Threshold = query.degradedThreshold
-                                }
-                            }
-                        };
-                        signalDefinition.Properties = properties;
-                    }
-                    else if (query.queryType == "LogQuery")
-                    {
-                        var properties = new LogAnalyticsSignalDefinitionProperties
-                        {
-                            Name = query.name,
-                            QueryText = query.queryText,
-                            DataUnit = query.dataUnit,
-                            TimeGrain = query.timeGrain,
-                            ValueColumnName = query.valueColumnName,
-                            EvaluationRules = new EvaluationRules
-                            {
-                                UnhealthyRule = new StaticThreshold
-                                {
-                                    Operator = query.unhealthyOperator,
-                                    Threshold = query.unhealthyThreshold
-                                },
-                                DegradedRule = new StaticThreshold
-                                {
-                                    Operator = query.degradedOperator,
-                                    Threshold = query.degradedThreshold
-                                }
-                            }
-                        };
-                        signalDefinition.Properties = properties;
-                    }
-                    else if (query.queryType == "PrometheusMetricsQuery")
-                    {
-                        var properties = new PrometheusSignalDefinitionProperties
-                        {
-                            Name = query.name,
-                            QueryText = query.queryText,
-                            DataUnit = query.dataUnit,
-                            TimeGrain = query.timeGrain,
-                            EvaluationRules = new EvaluationRules
-                            {
-                                UnhealthyRule = new StaticThreshold
-                                {
-                                    Operator = query.unhealthyOperator,
-                                    Threshold = query.unhealthyThreshold
-                                },
-                                DegradedRule = new StaticThreshold
-                                {
-                                    Operator = query.degradedOperator,
-                                    Threshold = query.degradedThreshold
-                                }
-                            }
-                        };
-                        signalDefinition.Properties = properties;
-                    }
-
-                    var symbolicName = $"sigDef{signalDefinitions.Count}";
-                    signalDefinitions.Add(symbolicName, signalDefinition);
-
-                    bicepBuilder.AppendLine();
-                    bicepBuilder.AppendLine(signalDefinition.ToBicepString(symbolicName, parent: modelSymbolicName));
-                }
-            }
-
-            foreach (var node in v1HealthModel.properties.nodes)
-            {
                 // Special handling for root node
                 var isRoot = node.nodeId == "0";
                 var nodeName = isRoot ? v2HealthModel.Name : node.nodeId;
@@ -296,7 +172,7 @@ public class BicepFileCreator
                 var dependsOn = new List<string>();
 
                 KeyValuePair<string, AuthenticationSetting>? authenticationSetting = null;
-                var queries = node.queries?.Where(q => q.enabledState == "Enabled").ToList(); // Filter out any disabled queries, those will not be assigned
+                var queries = node.queries?.Where(q => q.enabledState == "Enabled").ToList();
                 if (queries?.Count > 0)
                 {
                     authenticationSetting = authenticationSettings.FirstOrDefault(a =>
@@ -317,79 +193,96 @@ public class BicepFileCreator
                         }
                     }
 
-                    var signalGroup = new SignalGroup();
+                    var signalGroups = new SignalGroups();
 
+                    // Azure Resource Metric signals
                     var resourceMetricsQueries = queries
                         .Where(q => q.queryType == "ResourceMetricsQuery")
+                        .Where(q => !q.metricNamespace.Equals("microsoft.healthmodel/healthmodels",
+                            StringComparison.InvariantCultureIgnoreCase))
+                        .Where(q => q.dataType != "Text")
                         .ToList();
                     if (resourceMetricsQueries.Count != 0)
                     {
-                        signalGroup.AzureResource = new AzureResourceSignalGroup
-                        {
-                            AuthenticationSetting = authenticationSetting.Value.Value.Name,
-                            AzureResourceId = node.azureResourceId,
-                            SignalAssignments = new SignalAssignment
-                            {
-                                SignalDefinitions = resourceMetricsQueries
-                                    .Where(q => !q.metricNamespace.Equals("microsoft.healthmodel/healthmodels",
-                                        StringComparison.InvariantCultureIgnoreCase))
-                                    .Select(q => q.queryId).ToArray()
-                            }
-                        };
+                        var azureResourceId = node.azureResourceId;
 
                         // Special handling for nested health models
-                        if (node.azureResourceId.Contains("microsoft.healthmodel/healthmodels", StringComparison.InvariantCultureIgnoreCase))
+                        if (azureResourceId.Contains("microsoft.healthmodel/healthmodels", StringComparison.InvariantCultureIgnoreCase))
                         {
-                            signalGroup.AzureResource.AzureResourceId = node.azureResourceId.Replace(
+                            azureResourceId = azureResourceId.Replace(
                                 "microsoft.healthmodel/healthmodels", "Microsoft.CloudHealth/healthmodels", StringComparison.InvariantCultureIgnoreCase);
                             logger.LogInformation(
-                                "Replacing 'microsoft.healthmodel/healthmodels' with 'Microsoft.Cloudhealth/healthmodels' in AzureResourceId for nested health model {nodeName}. Ensure that the nested health model is also being converted and resides in the same resource group as before!",
+                                "Replacing 'microsoft.healthmodel/healthmodels' with 'Microsoft.CloudHealth/healthmodels' in AzureResourceId for nested health model {nodeName}. Ensure that the nested health model is also being converted and resides in the same resource group as before!",
                                 nodeName);
                         }
 
-                        var dependentQueries = resourceMetricsQueries
-                            .Where(q => !q.metricNamespace.Equals("microsoft.healthmodel/healthmodels",
-                                StringComparison.InvariantCultureIgnoreCase))
-                            .Select(q => signalDefinitions.First(kvp => kvp.Value.Name == q.queryId).Key);
-                        dependsOn.AddRange(dependentQueries);
+                        signalGroups.AzureResource = new AzureResourceSignalGroup
+                        {
+                            AuthenticationSetting = authenticationSetting.Value.Value.Name,
+                            AzureResourceId = azureResourceId,
+                            Signals = resourceMetricsQueries.Select(q => new AzureResourceSignalInstance
+                            {
+                                Name = q.queryId,
+                                DisplayName = q.metricName,
+                                MetricNamespace = q.metricNamespace,
+                                MetricName = q.metricName,
+                                TimeGrain = q.timeGrain,
+                                AggregationType = q.aggregationType,
+                                DataUnit = q.dataUnit,
+                                Dimension = q.dimension,
+                                DimensionFilter = q.dimensionFilter,
+                                EvaluationRules = CreateEvaluationRules(q.unhealthyOperator, q.unhealthyThreshold, q.degradedOperator, q.degradedThreshold)
+                            }).ToList()
+                        };
                     }
 
-                    // Filter out any queries that are of type LogQuery and have a data type of Text
-                    var logAnalyticsQueries = queries.Where(q => q.queryType == "LogQuery").Where(q => q.dataType != "Text")
+                    // Log Analytics Query signals
+                    var logAnalyticsQueries = queries
+                        .Where(q => q.queryType == "LogQuery")
+                        .Where(q => q.dataType != "Text")
                         .ToList();
                     if (logAnalyticsQueries.Count != 0)
                     {
-                        signalGroup.AzureLogAnalytics = new LogAnalyticsSignalGroup
+                        signalGroups.AzureLogAnalytics = new LogAnalyticsSignalGroup
                         {
                             AuthenticationSetting = authenticationSetting.Value.Value.Name,
                             LogAnalyticsWorkspaceResourceId = node.logAnalyticsResourceId,
-                            SignalAssignments = new SignalAssignment
+                            Signals = logAnalyticsQueries.Select(q => new LogAnalyticsSignalInstance
                             {
-                                SignalDefinitions = logAnalyticsQueries.Select(q => q.queryId).ToArray()
-                            }
+                                Name = q.queryId,
+                                DisplayName = q.name,
+                                QueryText = q.queryText,
+                                DataUnit = q.dataUnit,
+                                TimeGrain = q.timeGrain,
+                                ValueColumnName = q.valueColumnName,
+                                EvaluationRules = CreateEvaluationRules(q.unhealthyOperator, q.unhealthyThreshold, q.degradedOperator, q.degradedThreshold)
+                            }).ToList()
                         };
-
-                        dependsOn.AddRange(logAnalyticsQueries.Select(q =>
-                            signalDefinitions.First(kvp => kvp.Value.Name == q.queryId).Key));
                     }
 
-                    var prometheusQueries = queries.Where(q => q.queryType == "PrometheusMetricsQuery").ToList();
+                    // Prometheus Metrics Query signals
+                    var prometheusQueries = queries
+                        .Where(q => q.queryType == "PrometheusMetricsQuery")
+                        .ToList();
                     if (prometheusQueries.Count != 0)
                     {
-                        signalGroup.AzureMonitorWorkspace = new AzureMonitorWorkspaceSignalGroup
+                        signalGroups.AzureMonitorWorkspace = new AzureMonitorWorkspaceSignalGroup
                         {
                             AuthenticationSetting = authenticationSetting.Value.Value.Name,
                             AzureMonitorWorkspaceResourceId = node.azureMonitorWorkspaceResourceId,
-                            SignalAssignments = new SignalAssignment
+                            Signals = prometheusQueries.Select(q => new PrometheusSignalInstance
                             {
-                                SignalDefinitions = prometheusQueries.Select(q => q.queryId).ToArray()
-                            }
+                                Name = q.queryId,
+                                DisplayName = q.name,
+                                QueryText = q.queryText,
+                                DataUnit = q.dataUnit,
+                                TimeGrain = q.timeGrain,
+                                EvaluationRules = CreateEvaluationRules(q.unhealthyOperator, q.unhealthyThreshold, q.degradedOperator, q.degradedThreshold)
+                            }).ToList()
                         };
-
-                        dependsOn.AddRange(prometheusQueries.Select(q => signalDefinitions.First(kvp => kvp.Value.Name == q.queryId).Key));
                     }
 
-                    entity.Properties.SignalGroup = signalGroup;
+                    entity.Properties.SignalGroups = signalGroups;
                 }
 
                 var symbolicName = $"entity{entities.Count}";
@@ -448,6 +341,27 @@ public class BicepFileCreator
             logger.LogError(e, "Failed to convert v1 health model {healthModelName} to v2 Bicep file", v1HealthModel.name);
             return null;
         }
+    }
+
+    private static EvaluationRules CreateEvaluationRules(
+        string unhealthyOperator, string unhealthyThreshold,
+        string? degradedOperator, string? degradedThreshold)
+    {
+        return new EvaluationRules
+        {
+            UnhealthyRule = new ThresholdRule
+            {
+                Operator = unhealthyOperator,
+                Threshold = double.Parse(unhealthyThreshold)
+            },
+            DegradedRule = string.IsNullOrEmpty(degradedOperator) || string.IsNullOrEmpty(degradedThreshold)
+                ? null
+                : new ThresholdRule
+                {
+                    Operator = degradedOperator,
+                    Threshold = double.Parse(degradedThreshold)
+                }
+        };
     }
 
     /// <summary>
