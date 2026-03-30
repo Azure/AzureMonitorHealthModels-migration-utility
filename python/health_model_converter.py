@@ -27,7 +27,6 @@ try:
 except ImportError:
     AZURE_SDK_AVAILABLE = False
 
-
 # ============================================================================
 # Constants
 # ============================================================================
@@ -35,8 +34,7 @@ except ImportError:
 SUPPORTED_V2_LOCATIONS = ["canadacentral", "uksouth"]
 PROVIDER_NAMESPACE = "Microsoft.CloudHealth"
 HEALTH_MODELS_RESOURCE_TYPE = "healthmodels"
-API_VERSION = "2025-05-01-preview"
-
+API_VERSION = "2026-01-01-preview"
 
 # ============================================================================
 # Utility Functions
@@ -50,7 +48,6 @@ def generate_deterministic_guid(input_string: str) -> str:
     guid_bytes = hash_bytes[:16]
     # Format as GUID string
     return f"{guid_bytes[:4].hex()}-{guid_bytes[4:6].hex()}-{guid_bytes[6:8].hex()}-{guid_bytes[8:10].hex()}-{guid_bytes[10:16].hex()}"
-
 
 def setup_logger(name: str = "HealthModelConverter") -> logging.Logger:
     """Setup and return a logger instance."""
@@ -70,7 +67,6 @@ def setup_logger(name: str = "HealthModelConverter") -> logging.Logger:
     
     logger.addHandler(handler)
     return logger
-
 
 # ============================================================================
 # V1 Model Classes (Input)
@@ -97,12 +93,10 @@ class V1Query:
     dimension: Optional[str] = None
     dimensionFilter: Optional[str] = None
 
-
 @dataclass
 class V1Visual:
     x: int
     y: int
-
 
 @dataclass
 class V1Node:
@@ -121,7 +115,6 @@ class V1Node:
     azureMonitorWorkspaceResourceId: str = ""
     queryEndpoint: str = ""
 
-
 @dataclass
 class V1Properties:
     versionNumber: str
@@ -130,12 +123,10 @@ class V1Properties:
     provisioningState: str
     nodes: Optional[List[V1Node]]
 
-
 @dataclass
 class V1UserAssignedIdentity:
     principalId: str
     clientId: str
-
 
 @dataclass
 class V1Identity:
@@ -143,7 +134,6 @@ class V1Identity:
     tenantId: str
     type: str
     userAssignedIdentities: Optional[Dict[str, V1UserAssignedIdentity]]
-
 
 @dataclass
 class V1SystemData:
@@ -153,7 +143,6 @@ class V1SystemData:
     lastModifiedBy: str
     lastModifiedByType: str
     lastModifiedAt: str
-
 
 @dataclass
 class V1HealthModel:
@@ -165,7 +154,6 @@ class V1HealthModel:
     systemData: Optional[V1SystemData]
     identity: Optional[V1Identity]
     properties: V1Properties
-
 
 # ============================================================================
 # V2 Model Classes & Bicep Generation
@@ -203,6 +191,24 @@ class BicepBuilder:
     userAssignedIdentities: {user_mi}
   }}"""
 
+    @staticmethod
+    def format_evaluation_rules(unhealthy_operator: str, unhealthy_threshold: str,
+                                degraded_operator: str, degraded_threshold: str) -> str:
+        """Format evaluation rules for Bicep."""
+        degraded_str = ""
+        if degraded_operator and degraded_threshold:
+            degraded_str = f"""
+                    degradedRule: {{
+                      operator: '{degraded_operator}'
+                      threshold: {degraded_threshold}
+                    }}"""
+
+        return f"""{{
+                    unhealthyRule: {{
+                      operator: '{unhealthy_operator}'
+                      threshold: {unhealthy_threshold}
+                    }}{degraded_str}
+                  }}"""
 
 class V2HealthModel:
     """V2 Health Model resource."""
@@ -237,7 +243,6 @@ class V2HealthModel:
   dependsOn: []
 }}"""
 
-
 class AuthenticationSetting:
     """Authentication setting resource."""
     
@@ -261,138 +266,6 @@ class AuthenticationSetting:
   dependsOn: []
 }}"""
 
-
-class SignalDefinition:
-    """Base class for signal definitions."""
-    
-    def __init__(self, name: str):
-        self.name = name
-        self.type = f"{PROVIDER_NAMESPACE}/{HEALTH_MODELS_RESOURCE_TYPE}/signalDefinitions"
-        self.api_version = API_VERSION
-
-
-class AzureResourceSignalDefinition(SignalDefinition):
-    """Azure Resource metric signal definition."""
-    
-    def __init__(self, query: V1Query):
-        super().__init__(query.queryId)
-        self.query = query
-    
-    def to_bicep(self, symbolic_name: str, parent: str) -> str:
-        """Generate Bicep representation."""
-        dimension_str = "null" if not self.query.dimension else f"'{self.query.dimension}'"
-        dimension_filter_str = "null" if not self.query.dimensionFilter else f"'{self.query.dimensionFilter}'"
-        data_unit_str = "null" if not self.query.dataUnit else f"'{self.query.dataUnit}'"
-        
-        return f"""resource {symbolic_name} '{self.type}@{self.api_version}' = {{
-  parent: {parent}
-  name: '{self.name}'
-  properties: {{
-    displayName: '{self.query.metricName}'
-    signalKind: 'AzureResourceMetric'
-    dataUnit: {data_unit_str}
-    metricNamespace: '{self.query.metricNamespace}'
-    metricName: '{self.query.metricName}'
-    timeGrain: '{self.query.timeGrain}'
-    refreshInterval: 'PT1M'
-    aggregationType: '{self.query.aggregationType}'
-    dimension: {dimension_str}
-    dimensionFilter: {dimension_filter_str}
-    evaluationRules: {{
-      unhealthyRule: {{
-        operator: '{self.query.unhealthyOperator}'
-        threshold: '{self.query.unhealthyThreshold}'
-      }}
-      degradedRule: {{
-        operator: '{self.query.degradedOperator}'
-        threshold: '{self.query.degradedThreshold}'
-      }}
-    }}
-  }}
-  dependsOn: []
-}}"""
-
-
-class LogAnalyticsSignalDefinition(SignalDefinition):
-    """Log Analytics query signal definition."""
-    
-    def __init__(self, query: V1Query):
-        super().__init__(query.queryId)
-        self.query = query
-    
-    def to_bicep(self, symbolic_name: str, parent: str) -> str:
-        """Generate Bicep representation."""
-        # Escape newlines in query text
-        query_text = self.query.queryText.replace('\n', '\\n')
-        value_column = "null" if not self.query.valueColumnName else f"'{self.query.valueColumnName}'"
-        time_grain = "null" if not self.query.timeGrain else f"'{self.query.timeGrain}'"
-        data_unit = "null" if not self.query.dataUnit else f"'{self.query.dataUnit}'"
-        
-        return f"""resource {symbolic_name} '{self.type}@{self.api_version}' = {{
-  parent: {parent}
-  name: '{self.name}'
-  properties: {{
-    displayName: '{self.query.name}'
-    signalKind: 'LogAnalyticsQuery'
-    dataUnit: {data_unit}
-    queryText: '{query_text}'
-    valueColumnName: {value_column}
-    timeGrain: {time_grain}
-    refreshInterval: 'PT1M'
-    evaluationRules: {{
-      unhealthyRule: {{
-        operator: '{self.query.unhealthyOperator}'
-        threshold: '{self.query.unhealthyThreshold}'
-      }}
-      degradedRule: {{
-        operator: '{self.query.degradedOperator}'
-        threshold: '{self.query.degradedThreshold}'
-      }}
-    }}
-  }}
-  dependsOn: []
-}}"""
-
-
-class PrometheusSignalDefinition(SignalDefinition):
-    """Prometheus metrics query signal definition."""
-    
-    def __init__(self, query: V1Query):
-        super().__init__(query.queryId)
-        self.query = query
-    
-    def to_bicep(self, symbolic_name: str, parent: str) -> str:
-        """Generate Bicep representation."""
-        # Escape newlines in query text
-        query_text = self.query.queryText.replace('\n', '\\n')
-        time_grain = "null" if not self.query.timeGrain else f"'{self.query.timeGrain}'"
-        data_unit = "null" if not self.query.dataUnit else f"'{self.query.dataUnit}'"
-        
-        return f"""resource {symbolic_name} '{self.type}@{self.api_version}' = {{
-  parent: {parent}
-  name: '{self.name}'
-  properties: {{
-    displayName: '{self.query.name}'
-    signalKind: 'PrometheusMetricsQuery'
-    dataUnit: {data_unit}
-    queryText: '{query_text}'
-    timeGrain: {time_grain}
-    refreshInterval: 'PT1M'
-    evaluationRules: {{
-      unhealthyRule: {{
-        operator: '{self.query.unhealthyOperator}'
-        threshold: '{self.query.unhealthyThreshold}'
-      }}
-      degradedRule: {{
-        operator: '{self.query.degradedOperator}'
-        threshold: '{self.query.degradedThreshold}'
-      }}
-    }}
-  }}
-  dependsOn: []
-}}"""
-
-
 class Entity:
     """Entity resource."""
     
@@ -405,12 +278,28 @@ class Entity:
         self.api_version = API_VERSION
         self.signal_groups = {}
     
-    def add_signal_group(self, group_type: str, resource_id: str, auth_setting: str, signal_definitions: List[str]):
-        """Add a signal group to the entity."""
-        self.signal_groups[group_type] = {
+    def add_azure_resource_signals(self, resource_id: str, auth_setting_symbolic: str, signals: List[dict]):
+        """Add Azure Resource Metric signal group with inline signal instances."""
+        self.signal_groups['azureResource'] = {
             'resource_id': resource_id,
-            'auth_setting': auth_setting,
-            'signal_definitions': signal_definitions
+            'auth_setting_symbolic': auth_setting_symbolic,
+            'signals': signals
+        }
+    
+    def add_log_analytics_signals(self, workspace_id: str, auth_setting_symbolic: str, signals: List[dict]):
+        """Add Log Analytics signal group with inline signal instances."""
+        self.signal_groups['azureLogAnalytics'] = {
+            'resource_id': workspace_id,
+            'auth_setting_symbolic': auth_setting_symbolic,
+            'signals': signals
+        }
+    
+    def add_prometheus_signals(self, workspace_id: str, auth_setting_symbolic: str, signals: List[dict]):
+        """Add Azure Monitor Workspace signal group with inline signal instances."""
+        self.signal_groups['azureMonitorWorkspace'] = {
+            'resource_id': workspace_id,
+            'auth_setting_symbolic': auth_setting_symbolic,
+            'signals': signals
         }
     
     def to_bicep(self, symbolic_name: str, parent: str, depends_on: Optional[List[str]] = None,
@@ -424,7 +313,7 @@ class Entity:
       y: {self.canvas_position[1]}
     }}"""
         
-        signals_str = self._build_signals_string()
+        signal_groups_str = self._build_signal_groups_string()
         depends_str = BicepBuilder.format_depends_on(depends_on)
         
         return f"""resource {symbolic_name} '{self.type}@{self.api_version}' = {{
@@ -434,13 +323,13 @@ class Entity:
     displayName: '{self.display_name}'
     impact: '{self.impact}'
     canvasPosition: {canvas_str}
-    signals: {signals_str}
+    signalGroups: {signal_groups_str}
   }}
   dependsOn: {depends_str}
 }}"""
     
-    def _build_signals_string(self) -> str:
-        """Build the signals section of the entity."""
+    def _build_signal_groups_string(self) -> str:
+        """Build the signalGroups section of the entity."""
         if not self.signal_groups:
             return "null"
         
@@ -449,11 +338,11 @@ class Entity:
         # Azure Resource signals
         if 'azureResource' in self.signal_groups:
             group = self.signal_groups['azureResource']
-            assignments = self._build_signal_assignments(group['signal_definitions'])
+            signals_str = self._build_signals_array(group['signals'])
             parts.append(f"""    azureResource: {{
       azureResourceId: '{group['resource_id']}'
-      authenticationSetting: '{group['auth_setting']}'
-      signalAssignments: {assignments}
+      authenticationSetting: {group['auth_setting_symbolic']}.name
+      signals: {signals_str}
     }}""")
         else:
             parts.append("    azureResource: null")
@@ -461,11 +350,11 @@ class Entity:
         # Log Analytics signals
         if 'azureLogAnalytics' in self.signal_groups:
             group = self.signal_groups['azureLogAnalytics']
-            assignments = self._build_signal_assignments(group['signal_definitions'])
+            signals_str = self._build_signals_array(group['signals'])
             parts.append(f"""    azureLogAnalytics: {{
       logAnalyticsWorkspaceResourceId: '{group['resource_id']}'
-      authenticationSetting: '{group['auth_setting']}'
-      signalAssignments: {assignments}
+      authenticationSetting: {group['auth_setting_symbolic']}.name
+      signals: {signals_str}
     }}""")
         else:
             parts.append("    azureLogAnalytics: null")
@@ -473,55 +362,117 @@ class Entity:
         # Azure Monitor Workspace signals
         if 'azureMonitorWorkspace' in self.signal_groups:
             group = self.signal_groups['azureMonitorWorkspace']
-            assignments = self._build_signal_assignments(group['signal_definitions'])
+            signals_str = self._build_signals_array(group['signals'])
             parts.append(f"""    azureMonitorWorkspace: {{
       azureMonitorWorkspaceResourceId: '{group['resource_id']}'
-      authenticationSetting: '{group['auth_setting']}'
-      signalAssignments: {assignments}
+      authenticationSetting: {group['auth_setting_symbolic']}.name
+      signals: {signals_str}
     }}""")
         else:
             parts.append("    azureMonitorWorkspace: null")
         
         return "{\n" + "\n".join(parts) + "\n  }"
     
-    def _build_signal_assignments(self, signal_definitions: List[str]) -> str:
-        """Build signal assignments array."""
-        if not signal_definitions:
+    def _build_signals_array(self, signals: List[dict]) -> str:
+        """Build inline signals array."""
+        if not signals:
             return "null"
         
-        assignments = []
-        for sig_def in signal_definitions:
-            assignments.append(f"""        {{
-          signalDefinitions: ['{sig_def}']
-        }}""")
+        items = []
+        for sig in signals:
+            items.append(sig['bicep'])
         
-        return "[\n" + "\n".join(assignments) + "\n      ]"
+        return "[\n" + "\n".join(items) + "\n      ]"
 
+def build_azure_resource_signal_bicep(query: 'V1Query') -> str:
+    """Build Bicep string for an Azure Resource Metric signal instance."""
+    dimension_str = "null" if not query.dimension else f"'{query.dimension}'"
+    dimension_filter_str = "null" if not query.dimensionFilter else f"'{query.dimensionFilter}'"
+    data_unit_str = "null" if not query.dataUnit else f"'{query.dataUnit}'"
+    eval_rules = BicepBuilder.format_evaluation_rules(
+        query.unhealthyOperator, query.unhealthyThreshold,
+        query.degradedOperator, query.degradedThreshold)
+    
+    return f"""        {{
+          signalKind: 'AzureResourceMetric'
+          name: '{query.queryId}'
+          displayName: '{query.metricName}'
+          dataUnit: {data_unit_str}
+          metricNamespace: '{query.metricNamespace}'
+          metricName: '{query.metricName}'
+          timeGrain: '{query.timeGrain}'
+          refreshInterval: 'PT1M'
+          aggregationType: '{query.aggregationType}'
+          dimension: {dimension_str}
+          dimensionFilter: {dimension_filter_str}
+          evaluationRules: {eval_rules}
+        }}"""
+
+def build_log_analytics_signal_bicep(query: 'V1Query') -> str:
+    """Build Bicep string for a Log Analytics signal instance."""
+    query_text = query.queryText.replace('\n', '\\n')
+    value_column = "null" if not query.valueColumnName else f"'{query.valueColumnName}'"
+    time_grain = "null" if not query.timeGrain else f"'{query.timeGrain}'"
+    data_unit = "null" if not query.dataUnit else f"'{query.dataUnit}'"
+    eval_rules = BicepBuilder.format_evaluation_rules(
+        query.unhealthyOperator, query.unhealthyThreshold,
+        query.degradedOperator, query.degradedThreshold)
+    
+    return f"""        {{
+          signalKind: 'LogAnalyticsQuery'
+          name: '{query.queryId}'
+          displayName: '{query.name}'
+          dataUnit: {data_unit}
+          queryText: '{query_text}'
+          valueColumnName: {value_column}
+          timeGrain: {time_grain}
+          refreshInterval: 'PT1M'
+          evaluationRules: {eval_rules}
+        }}"""
+
+def build_prometheus_signal_bicep(query: 'V1Query') -> str:
+    """Build Bicep string for a Prometheus Metrics signal instance."""
+    query_text = query.queryText.replace('\n', '\\n')
+    time_grain = "null" if not query.timeGrain else f"'{query.timeGrain}'"
+    data_unit = "null" if not query.dataUnit else f"'{query.dataUnit}'"
+    eval_rules = BicepBuilder.format_evaluation_rules(
+        query.unhealthyOperator, query.unhealthyThreshold,
+        query.degradedOperator, query.degradedThreshold)
+    
+    return f"""        {{
+          signalKind: 'PrometheusMetricsQuery'
+          name: '{query.queryId}'
+          displayName: '{query.name}'
+          dataUnit: {data_unit}
+          queryText: '{query_text}'
+          timeGrain: {time_grain}
+          refreshInterval: 'PT1M'
+          evaluationRules: {eval_rules}
+        }}"""
 
 class Relationship:
     """Relationship resource."""
     
-    def __init__(self, name: str, parent_entity: str, child_entity: str):
+    def __init__(self, name: str, parent_entity: str, child_entity: str,
+                 parent_entity_symbolic: str, child_entity_symbolic: str):
         self.name = name
         self.parent_entity = parent_entity
         self.child_entity = child_entity
+        self.parent_entity_symbolic = parent_entity_symbolic
+        self.child_entity_symbolic = child_entity_symbolic
         self.type = f"{PROVIDER_NAMESPACE}/{HEALTH_MODELS_RESOURCE_TYPE}/relationships"
         self.api_version = API_VERSION
     
-    def to_bicep(self, symbolic_name: str, parent: str, depends_on: Optional[List[str]] = None) -> str:
+    def to_bicep(self, symbolic_name: str, parent: str) -> str:
         """Generate Bicep representation."""
-        depends_str = BicepBuilder.format_depends_on(depends_on)
-        
         return f"""resource {symbolic_name} '{self.type}@{self.api_version}' = {{
   parent: {parent}
   name: '{self.name}'
   properties: {{
-    parentEntityName: '{self.parent_entity}'
-    childEntityName: '{self.child_entity}'
+    parentEntityName: {self.parent_entity_symbolic}.name
+    childEntityName: {self.child_entity_symbolic}.name
   }}
-  dependsOn: {depends_str}
 }}"""
-
 
 # ============================================================================
 # Azure Resource Utilities
@@ -585,18 +536,7 @@ class HealthModelConverter:
                 self.logger.warning("No nodes found in v1 health model")
                 return None
             
-            # Validate query IDs are unique
-            all_query_ids = []
-            for node in v1_model.properties.nodes:
-                if node.queries:
-                    all_query_ids.extend([q.queryId for q in node.queries])
-            
-            if len(all_query_ids) != len(set(all_query_ids)):
-                self.logger.warning("Duplicate queryIds found in v1 health model. Please ensure all queryIds are unique.")
-                return None
-            
             # Track resources
-            signal_definitions = {}
             authentication_settings = {}
             entities = {}
             relationships = {}
@@ -622,39 +562,7 @@ class HealthModelConverter:
                         bicep_lines.append("")
                         bicep_lines.append(auth_setting.to_bicep(symbolic_name, model_symbolic_name))
             
-            # Process signal definitions from all nodes
-            for node in v1_model.properties.nodes:
-                if not node.queries:
-                    continue
-                
-                for query in node.queries:
-                    # Skip Text data type queries
-                    if query.dataType == "Text":
-                        self.logger.warning(f"Query {query.queryId} has unsupported data type 'Text'. Not migrating this query!")
-                        continue
-                    
-                    # Skip nested health model metrics
-                    if query.queryType == "ResourceMetricsQuery" and \
-                       query.metricNamespace.lower() == "microsoft.healthmodel/healthmodels":
-                        self.logger.warning(f"Query {query.queryId} for nested health models will not be migrated. Nested health models are handled differently!")
-                        continue
-                    
-                    # Create appropriate signal definition
-                    signal_def = None
-                    if query.queryType == "ResourceMetricsQuery":
-                        signal_def = AzureResourceSignalDefinition(query)
-                    elif query.queryType == "LogQuery":
-                        signal_def = LogAnalyticsSignalDefinition(query)
-                    elif query.queryType == "PrometheusMetricsQuery":
-                        signal_def = PrometheusSignalDefinition(query)
-                    
-                    if signal_def:
-                        symbolic_name = f"sigDef{len(signal_definitions)}"
-                        signal_definitions[symbolic_name] = signal_def
-                        bicep_lines.append("")
-                        bicep_lines.append(signal_def.to_bicep(symbolic_name, model_symbolic_name))
-            
-            # Process entities (nodes)
+            # Process entities (nodes) with inline signals
             for node in v1_model.properties.nodes:
                 # Check if this is the root node
                 is_root = node.nodeId == "0"
@@ -688,18 +596,18 @@ class HealthModelConverter:
                         
                         if auth_setting_key:
                             auth_setting = authentication_settings[auth_setting_key]
-                            depends_on.append(auth_setting_key)
                             
                             # Group queries by type
                             resource_metrics = [q for q in enabled_queries 
                                                if q.queryType == "ResourceMetricsQuery" and 
-                                               q.metricNamespace.lower() != "microsoft.healthmodel/healthmodels"]
+                                               q.metricNamespace.lower() != "microsoft.healthmodel/healthmodels" and
+                                               q.dataType != "Text"]
                             log_analytics = [q for q in enabled_queries 
                                            if q.queryType == "LogQuery" and q.dataType != "Text"]
                             prometheus = [q for q in enabled_queries 
                                         if q.queryType == "PrometheusMetricsQuery"]
                             
-                            # Add Azure Resource signal group
+                            # Add Azure Resource signal group with inline signals
                             if resource_metrics:
                                 azure_resource_id = node.azureResourceId
                                 # Handle nested health models
@@ -710,51 +618,30 @@ class HealthModelConverter:
                                     )
                                     self.logger.info(f"Replacing resource provider for nested health model {node_name}")
                                 
-                                entity.add_signal_group(
-                                    'azureResource',
+                                signals = [{'bicep': build_azure_resource_signal_bicep(q)} for q in resource_metrics]
+                                entity.add_azure_resource_signals(
                                     azure_resource_id,
-                                    auth_setting.name,
-                                    [q.queryId for q in resource_metrics]
+                                    auth_setting_key,
+                                    signals
                                 )
-                                
-                                # Add signal definition dependencies
-                                for q in resource_metrics:
-                                    for sig_key, sig_def in signal_definitions.items():
-                                        if sig_def.name == q.queryId:
-                                            depends_on.append(sig_key)
-                                            break
                             
-                            # Add Log Analytics signal group
+                            # Add Log Analytics signal group with inline signals
                             if log_analytics and node.logAnalyticsResourceId:
-                                entity.add_signal_group(
-                                    'azureLogAnalytics',
+                                signals = [{'bicep': build_log_analytics_signal_bicep(q)} for q in log_analytics]
+                                entity.add_log_analytics_signals(
                                     node.logAnalyticsResourceId,
-                                    auth_setting.name,
-                                    [q.queryId for q in log_analytics]
+                                    auth_setting_key,
+                                    signals
                                 )
-                                
-                                # Add signal definition dependencies
-                                for q in log_analytics:
-                                    for sig_key, sig_def in signal_definitions.items():
-                                        if sig_def.name == q.queryId:
-                                            depends_on.append(sig_key)
-                                            break
                             
-                            # Add Prometheus signal group
+                            # Add Prometheus signal group with inline signals
                             if prometheus and node.azureMonitorWorkspaceResourceId:
-                                entity.add_signal_group(
-                                    'azureMonitorWorkspace',
+                                signals = [{'bicep': build_prometheus_signal_bicep(q)} for q in prometheus]
+                                entity.add_prometheus_signals(
                                     node.azureMonitorWorkspaceResourceId,
-                                    auth_setting.name,
-                                    [q.queryId for q in prometheus]
+                                    auth_setting_key,
+                                    signals
                                 )
-                                
-                                # Add signal definition dependencies
-                                for q in prometheus:
-                                    for sig_key, sig_def in signal_definitions.items():
-                                        if sig_def.name == q.queryId:
-                                            depends_on.append(sig_key)
-                                            break
                 
                 # Add entity to collection
                 symbolic_name = f"entity{len(entities)}"
@@ -776,12 +663,6 @@ class HealthModelConverter:
                 
                 if node.childNodeIds:
                     for child_id in node.childNodeIds:
-                        relationship_name = generate_deterministic_guid(f"{node_name}-{child_id}")
-                        relationship = Relationship(relationship_name, node_name, child_id)
-                        
-                        symbolic_name = f"relationship{len(relationships)}"
-                        relationships[symbolic_name] = relationship
-                        
                         # Find parent and child entity symbolic names
                         parent_entity_key = None
                         child_entity_key = None
@@ -792,15 +673,19 @@ class HealthModelConverter:
                             if entity.name == child_id:
                                 child_entity_key = key
                         
-                        depends_on = []
-                        if parent_entity_key:
-                            depends_on.append(parent_entity_key)
-                        if child_entity_key:
-                            depends_on.append(child_entity_key)
+                        relationship_name = generate_deterministic_guid(f"{node_name}-{child_id}")
+                        relationship = Relationship(
+                            relationship_name, node_name, child_id,
+                            parent_entity_key or "entity0",
+                            child_entity_key or "entity0"
+                        )
+                        
+                        symbolic_name = f"relationship{len(relationships)}"
+                        relationships[symbolic_name] = relationship
                         
                         bicep_lines.append("")
                         bicep_lines.append(relationship.to_bicep(
-                            symbolic_name, model_symbolic_name, depends_on
+                            symbolic_name, model_symbolic_name
                         ))
             
             return "\n".join(bicep_lines)
@@ -1074,7 +959,6 @@ class HealthModelConverter:
                 self.logger.error("Authentication failed. Please ensure you are logged in to Azure (e.g., 'az login')")
             return None
 
-
 # ============================================================================
 # Main CLI Application
 # ============================================================================
@@ -1318,7 +1202,6 @@ Required packages for Azure conversion:
     else:
         parser.print_help()
         return 1
-
 
 if __name__ == '__main__':
     sys.exit(main())

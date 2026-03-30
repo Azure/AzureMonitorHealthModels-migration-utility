@@ -6,12 +6,12 @@ public class HealthModel : IResourceType
 {
     public required string Name { get; set; }
     public string Type => $"{Constants.ProviderNamespace}/{Constants.HealthModelsResourceType}";
-    public string ApiVersion => "2025-05-01-preview";
+    public string ApiVersion => "2026-01-01-preview";
 
     public string? Location { get; set; }
     public Dictionary<string, string>? Tags { get; set; }
     public Identity? Identity { get; set; }
-    public HealthModelProperties Properties { get; set; }
+    public HealthModelProperties? Properties { get; set; }
 
     public string ToBicepString(
         string symbolicName,

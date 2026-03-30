@@ -7,9 +7,9 @@ public class Entity : IResourceType
 {
     public required string Name { get; set; }
     public string Type => $"{Constants.ProviderNamespace}/{Constants.HealthModelsResourceType}/entities";
-    public string ApiVersion => "2025-05-01-preview";
+    public string ApiVersion => "2026-01-01-preview";
 
-    public EntityProperties Properties { get; set; }
+    public required EntityProperties Properties { get; set; }
 
     public string ToBicepString(string symbolicName,
         string? overwriteNameParameter = null, string? parent = null,
@@ -40,7 +40,7 @@ public class EntityProperties : IResourceProperties
     public string Impact { get; set; } = "Standard";
     public CanvasPosition? CanvasPosition { get; set; }
 
-    public SignalGroup? SignalGroup { get; set; }
+    public SignalGroups? SignalGroups { get; set; }
 
     public string ToBicepString()
     {
@@ -58,7 +58,7 @@ public class EntityProperties : IResourceProperties
                                displayName: '{{DisplayName}}'
                                impact: '{{Impact}}'
                                canvasPosition: {{canvasPositionString}}
-                               signals: {{(SignalGroup == null ? "null" : SignalGroup.ToBicepString())}}
+                               signalGroups: {{(SignalGroups == null ? "null" : SignalGroups.ToBicepString())}}
                            }
                          """;
 
@@ -66,7 +66,7 @@ public class EntityProperties : IResourceProperties
     }
 }
 
-public class SignalGroup
+public class SignalGroups
 {
     public AzureResourceSignalGroup? AzureResource { get; set; }
     public LogAnalyticsSignalGroup? AzureLogAnalytics { get; set; }
@@ -79,8 +79,8 @@ public class SignalGroup
             : $$"""
                 {
                           azureResourceId: '{{AzureResource.AzureResourceId}}'
-                          authenticationSetting: '{{AzureResource.AuthenticationSetting}}'
-                          signalAssignments: {{AzureResource.SignalAssignmentsToBicepString()}}
+                          authenticationSetting: {{AzureResource.AuthenticationSettingSymbolicName}}.name
+                          signals: {{AzureResource.SignalsToBicepString()}}
                         }
                 """;
 
@@ -89,8 +89,8 @@ public class SignalGroup
             : $$"""
                 {
                           logAnalyticsWorkspaceResourceId: '{{AzureLogAnalytics.LogAnalyticsWorkspaceResourceId}}'
-                          authenticationSetting: '{{AzureLogAnalytics.AuthenticationSetting}}'
-                          signalAssignments: {{AzureLogAnalytics.SignalAssignmentsToBicepString()}}
+                          authenticationSetting: {{AzureLogAnalytics.AuthenticationSettingSymbolicName}}.name
+                          signals: {{AzureLogAnalytics.SignalsToBicepString()}}
                         }
                 """;
 
@@ -99,8 +99,8 @@ public class SignalGroup
             : $$"""
                 {
                           azureMonitorWorkspaceResourceId: '{{AzureMonitorWorkspace.AzureMonitorWorkspaceResourceId}}'
-                          authenticationSetting: '{{AzureMonitorWorkspace.AuthenticationSetting}}'
-                          signalAssignments: {{AzureMonitorWorkspace.SignalAssignmentsToBicepString()}}
+                          authenticationSetting: {{AzureMonitorWorkspace.AuthenticationSettingSymbolicName}}.name
+                          signals: {{AzureMonitorWorkspace.SignalsToBicepString()}}
                         }
                 """;
 
@@ -116,60 +116,201 @@ public class SignalGroup
     }
 }
 
-public abstract class SignalAssignmentGroup
+#region Signal Groups
+
+public class AzureResourceSignalGroup
 {
-    public required string AuthenticationSetting { get; set; }
-    public SignalAssignment? SignalAssignments { get; set; }
+    public required string AuthenticationSettingSymbolicName { get; set; }
+    public required string AzureResourceId { get; set; }
+    public List<AzureResourceSignalInstance>? Signals { get; set; }
 
-    public string SignalAssignmentsToBicepString()
+    public string SignalsToBicepString()
     {
-        string signalAssignmentsString;
-        if (SignalAssignments == null || SignalAssignments.SignalDefinitions == null ||
-            SignalAssignments.SignalDefinitions.Length == 0)
+        if (Signals == null || Signals.Count == 0) return "null";
+        var sb = new StringBuilder();
+        sb.Append("[\n");
+        foreach (var s in Signals)
         {
-            signalAssignmentsString = "null";
+            sb.Append(s.ToBicepString());
+            sb.Append('\n');
         }
-        else
-        {
-            var sb = new StringBuilder();
-            sb.Append("[\n");
-            foreach (var sigDefName in SignalAssignments.SignalDefinitions)
-            {
-                sb.Append($$"""
-                                        {
-                                          signalDefinitions: ['{{sigDefName}}']
-                                        }
-                            """);
-                sb.Append('\n');
-            }
-
-            sb.Append("          ]");
-            signalAssignmentsString = sb.ToString();
-        }
-
-        return signalAssignmentsString;
+        sb.Append("          ]");
+        return sb.ToString();
     }
 }
 
-public class SignalAssignment
+public class LogAnalyticsSignalGroup
 {
-    public string[]? SignalDefinitions { get; set; }
-}
-
-public class AzureMonitorWorkspaceSignalGroup : SignalAssignmentGroup
-{
-    public required string AzureMonitorWorkspaceResourceId { get; set; }
-}
-
-public class LogAnalyticsSignalGroup : SignalAssignmentGroup
-{
+    public required string AuthenticationSettingSymbolicName { get; set; }
     public required string LogAnalyticsWorkspaceResourceId { get; set; }
+    public List<LogAnalyticsSignalInstance>? Signals { get; set; }
+
+    public string SignalsToBicepString()
+    {
+        if (Signals == null || Signals.Count == 0) return "null";
+        var sb = new StringBuilder();
+        sb.Append("[\n");
+        foreach (var s in Signals)
+        {
+            sb.Append(s.ToBicepString());
+            sb.Append('\n');
+        }
+        sb.Append("          ]");
+        return sb.ToString();
+    }
 }
 
-public class AzureResourceSignalGroup : SignalAssignmentGroup
+public class AzureMonitorWorkspaceSignalGroup
 {
-    public required string AzureResourceId { get; set; }
+    public required string AuthenticationSettingSymbolicName { get; set; }
+    public required string AzureMonitorWorkspaceResourceId { get; set; }
+    public List<PrometheusSignalInstance>? Signals { get; set; }
+
+    public string SignalsToBicepString()
+    {
+        if (Signals == null || Signals.Count == 0) return "null";
+        var sb = new StringBuilder();
+        sb.Append("[\n");
+        foreach (var s in Signals)
+        {
+            sb.Append(s.ToBicepString());
+            sb.Append('\n');
+        }
+        sb.Append("          ]");
+        return sb.ToString();
+    }
 }
+
+#endregion
+
+#region Signal Instances
+
+public class EvaluationRules
+{
+    public required ThresholdRule UnhealthyRule { get; set; }
+    public ThresholdRule? DegradedRule { get; set; }
+
+    public string ToBicepString()
+    {
+        var degradedRuleString = DegradedRule == null
+            ? ""
+            : $$"""
+
+                                    degradedRule: {
+                                      operator: '{{DegradedRule.Operator}}'
+                                      threshold: {{DegradedRule.Threshold}}
+                                    }
+                """;
+
+        return $$"""
+                 {
+                                    unhealthyRule: {
+                                      operator: '{{UnhealthyRule.Operator}}'
+                                      threshold: {{UnhealthyRule.Threshold}}
+                                    }{{degradedRuleString}}
+                                  }
+                 """;
+    }
+}
+
+public class ThresholdRule
+{
+    public required string Operator { get; set; }
+    public required double Threshold { get; set; }
+}
+
+public class AzureResourceSignalInstance
+{
+    public required string Name { get; set; }
+    public string? DisplayName { get; set; }
+    public string? DataUnit { get; set; }
+    public required string MetricNamespace { get; set; }
+    public required string MetricName { get; set; }
+    public required string TimeGrain { get; set; }
+    public string RefreshInterval { get; set; } = "PT1M";
+    public required string AggregationType { get; set; }
+    public string? Dimension { get; set; }
+    public string? DimensionFilter { get; set; }
+    public required EvaluationRules EvaluationRules { get; set; }
+
+    public string ToBicepString()
+    {
+        return $$"""
+                                    {
+                                      signalKind: 'AzureResourceMetric'
+                                      name: '{{Name}}'
+                                      displayName: '{{DisplayName ?? MetricName}}'
+                                      dataUnit: {{(DataUnit == null ? "null" : "'" + DataUnit + "'")}}
+                                      metricNamespace: '{{MetricNamespace}}'
+                                      metricName: '{{MetricName}}'
+                                      timeGrain: '{{TimeGrain}}'
+                                      refreshInterval: '{{RefreshInterval}}'
+                                      aggregationType: '{{AggregationType}}'
+                                      dimension: {{(Dimension == null ? "null" : "'" + Dimension + "'")}}
+                                      dimensionFilter: {{(DimensionFilter == null ? "null" : "'" + DimensionFilter + "'")}}
+                                      evaluationRules: {{EvaluationRules.ToBicepString()}}
+                                    }
+                 """;
+    }
+}
+
+public class LogAnalyticsSignalInstance
+{
+    public required string Name { get; set; }
+    public string? DisplayName { get; set; }
+    public string? DataUnit { get; set; }
+    public required string QueryText { get; set; }
+    public string? TimeGrain { get; set; }
+    public string RefreshInterval { get; set; } = "PT1M";
+    public string? ValueColumnName { get; set; }
+    public required EvaluationRules EvaluationRules { get; set; }
+
+    public string ToBicepString()
+    {
+        return $$"""
+                                    {
+                                      signalKind: 'LogAnalyticsQuery'
+                                      name: '{{Name}}'
+                                      displayName: '{{DisplayName ?? Name}}'
+                                      dataUnit: {{(DataUnit == null ? "null" : "'" + DataUnit + "'")}}
+                                      queryText: '{{QueryText.Replace("\n", "\\n")}}'
+                                      valueColumnName: {{(ValueColumnName == null ? "null" : "'" + ValueColumnName + "'")}}
+                                      timeGrain: {{(TimeGrain == null ? "null" : "'" + TimeGrain + "'")}}
+                                      refreshInterval: '{{RefreshInterval}}'
+                                      evaluationRules: {{EvaluationRules.ToBicepString()}}
+                                    }
+                 """;
+    }
+}
+
+public class PrometheusSignalInstance
+{
+    public required string Name { get; set; }
+    public string? DisplayName { get; set; }
+    public string? DataUnit { get; set; }
+    public required string QueryText { get; set; }
+    public string? TimeGrain { get; set; }
+    public string RefreshInterval { get; set; } = "PT1M";
+    public required EvaluationRules EvaluationRules { get; set; }
+
+    public string ToBicepString()
+    {
+        return $$"""
+                                    {
+                                      signalKind: 'PrometheusMetricsQuery'
+                                      name: '{{Name}}'
+                                      displayName: '{{DisplayName ?? Name}}'
+                                      dataUnit: {{(DataUnit == null ? "null" : "'" + DataUnit + "'")}}
+                                      queryText: '{{QueryText.Replace("\n", "\\n")}}'
+                                      timeGrain: {{(TimeGrain == null ? "null" : "'" + TimeGrain + "'")}}
+                                      refreshInterval: '{{RefreshInterval}}'
+                                      evaluationRules: {{EvaluationRules.ToBicepString()}}
+                                    }
+                 """;
+    }
+}
+
+#endregion
 
 public class CanvasPosition
 {

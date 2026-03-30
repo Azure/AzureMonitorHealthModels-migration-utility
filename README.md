@@ -1,17 +1,19 @@
 # Azure Monitor health models migration utility
 
-This is a simple tool to convert a Azure Monitor health models **Private Preview** configuration to an Azure Monitor health models **Public Preview** configuration. It outputs either a Bicep or ARM template file to deploy a new Public Preview health model resource with all related resource types.
+This is a simple tool to convert an Azure Monitor health models **Private Preview** configuration to an Azure Monitor health models **Public Preview** configuration (`2026-01-01-preview`). It outputs either a Bicep or ARM template file to deploy a new Public Preview health model resource with all related resource types.
+
+The converter translates Private Preview signal queries directly into inline signal instances on Public Preview entities — no separate signal definition resources are created.
 
 ## Prerequisites
 
 ### Option 1: .NET Implementation (Windows only)
 
-- .NET 8 runtime installed
+- .NET 10 runtime installed
 - Utility tool binaries downloaded from the **Releases** section of this GitHub repository
 
 ### Option 2: Python Implementation (Cross-platform)
 
-- Python 3.7+ installed
+- Python 3.9+ installed
 - (Optional) Azure SDK dependencies for Azure resource conversion:
 
   ```bash

@@ -6,8 +6,11 @@ public class Relationship : IResourceType
 {
     public required string Name { get; set; }
     public string Type => $"{Constants.ProviderNamespace}/{Constants.HealthModelsResourceType}/relationships";
-    public string ApiVersion => "2025-05-01-preview";
-    public RelationshipProperties Properties { get; set; }
+    public string ApiVersion => "2026-01-01-preview";
+    public required RelationshipProperties Properties { get; set; }
+
+    public required string ParentEntitySymbolicName { get; set; }
+    public required string ChildEntitySymbolicName { get; set; }
 
     public string ToBicepString(string symbolicName,
         string? overwriteNameParameter = null, string? parent = null,
@@ -15,19 +18,14 @@ public class Relationship : IResourceType
     {
         ArgumentNullException.ThrowIfNull(parent);
 
-        var dependsOnString = dependsOn == null || !dependsOn.Any()
-            ? "[]"
-            : "[\n    " + string.Join("\n    ", dependsOn) + "\n  ]";
-
         var template = $$"""
                          resource {{symbolicName}} '{{Type}}@{{ApiVersion}}' = {
                            parent: {{parent}}
                            name: {{overwriteNameParameter ?? $"'{Name}'"}}
                            properties: {
-                             parentEntityName: '{{Properties.ParentEntityName}}'
-                             childEntityName: '{{Properties.ChildEntityName}}'
+                             parentEntityName: {{ParentEntitySymbolicName}}.name
+                             childEntityName: {{ChildEntitySymbolicName}}.name
                            }
-                           dependsOn: {{dependsOnString}}
                          }
                          """;
 
