@@ -79,7 +79,7 @@ public class SignalGroups
             : $$"""
                 {
                           azureResourceId: '{{AzureResource.AzureResourceId}}'
-                          authenticationSetting: '{{AzureResource.AuthenticationSetting}}'
+                          authenticationSetting: {{AzureResource.AuthenticationSettingSymbolicName}}.name
                           signals: {{AzureResource.SignalsToBicepString()}}
                         }
                 """;
@@ -89,7 +89,7 @@ public class SignalGroups
             : $$"""
                 {
                           logAnalyticsWorkspaceResourceId: '{{AzureLogAnalytics.LogAnalyticsWorkspaceResourceId}}'
-                          authenticationSetting: '{{AzureLogAnalytics.AuthenticationSetting}}'
+                          authenticationSetting: {{AzureLogAnalytics.AuthenticationSettingSymbolicName}}.name
                           signals: {{AzureLogAnalytics.SignalsToBicepString()}}
                         }
                 """;
@@ -99,7 +99,7 @@ public class SignalGroups
             : $$"""
                 {
                           azureMonitorWorkspaceResourceId: '{{AzureMonitorWorkspace.AzureMonitorWorkspaceResourceId}}'
-                          authenticationSetting: '{{AzureMonitorWorkspace.AuthenticationSetting}}'
+                          authenticationSetting: {{AzureMonitorWorkspace.AuthenticationSettingSymbolicName}}.name
                           signals: {{AzureMonitorWorkspace.SignalsToBicepString()}}
                         }
                 """;
@@ -120,7 +120,7 @@ public class SignalGroups
 
 public class AzureResourceSignalGroup
 {
-    public required string AuthenticationSetting { get; set; }
+    public required string AuthenticationSettingSymbolicName { get; set; }
     public required string AzureResourceId { get; set; }
     public List<AzureResourceSignalInstance>? Signals { get; set; }
 
@@ -141,7 +141,7 @@ public class AzureResourceSignalGroup
 
 public class LogAnalyticsSignalGroup
 {
-    public required string AuthenticationSetting { get; set; }
+    public required string AuthenticationSettingSymbolicName { get; set; }
     public required string LogAnalyticsWorkspaceResourceId { get; set; }
     public List<LogAnalyticsSignalInstance>? Signals { get; set; }
 
@@ -162,7 +162,7 @@ public class LogAnalyticsSignalGroup
 
 public class AzureMonitorWorkspaceSignalGroup
 {
-    public required string AuthenticationSetting { get; set; }
+    public required string AuthenticationSettingSymbolicName { get; set; }
     public required string AzureMonitorWorkspaceResourceId { get; set; }
     public List<PrometheusSignalInstance>? Signals { get; set; }
 

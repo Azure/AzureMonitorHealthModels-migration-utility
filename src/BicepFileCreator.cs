@@ -218,7 +218,7 @@ public class BicepFileCreator
 
                         signalGroups.AzureResource = new AzureResourceSignalGroup
                         {
-                            AuthenticationSetting = authenticationSetting.Value.Value.Name,
+                            AuthenticationSettingSymbolicName = authenticationSetting.Value.Key,
                             AzureResourceId = azureResourceId,
                             Signals = resourceMetricsQueries.Select(q => new AzureResourceSignalInstance
                             {
@@ -245,7 +245,7 @@ public class BicepFileCreator
                     {
                         signalGroups.AzureLogAnalytics = new LogAnalyticsSignalGroup
                         {
-                            AuthenticationSetting = authenticationSetting.Value.Value.Name,
+                            AuthenticationSettingSymbolicName = authenticationSetting.Value.Key,
                             LogAnalyticsWorkspaceResourceId = node.logAnalyticsResourceId,
                             Signals = logAnalyticsQueries.Select(q => new LogAnalyticsSignalInstance
                             {
@@ -268,7 +268,7 @@ public class BicepFileCreator
                     {
                         signalGroups.AzureMonitorWorkspace = new AzureMonitorWorkspaceSignalGroup
                         {
-                            AuthenticationSetting = authenticationSetting.Value.Value.Name,
+                            AuthenticationSettingSymbolicName = authenticationSetting.Value.Key,
                             AzureMonitorWorkspaceResourceId = node.azureMonitorWorkspaceResourceId,
                             Signals = prometheusQueries.Select(q => new PrometheusSignalInstance
                             {
@@ -287,11 +287,6 @@ public class BicepFileCreator
 
                 var symbolicName = $"entity{entities.Count}";
                 entities.Add(symbolicName, entity);
-
-                if (authenticationSetting != null)
-                {
-                    dependsOn.Add(authenticationSetting.Value.Key);
-                }
 
                 bicepBuilder.AppendLine();
                 if (isRoot)
@@ -312,6 +307,9 @@ public class BicepFileCreator
                     continue;
                 foreach (var childNodeId in childNodeIds)
                 {
+                    var parentEntitySymbolicName = entities.First(kvp => kvp.Value.Name == nodeName).Key;
+                    var childEntitySymbolicName = entities.First(kvp => kvp.Value.Name == childNodeId).Key;
+
                     var relationship = new Relationship
                     {
                         Name = $"{nodeName}-{childNodeId}".GenerateDeterministicGuid().ToString(),
@@ -319,18 +317,16 @@ public class BicepFileCreator
                         {
                             ParentEntityName = nodeName,
                             ChildEntityName = childNodeId
-                        }
+                        },
+                        ParentEntitySymbolicName = parentEntitySymbolicName,
+                        ChildEntitySymbolicName = childEntitySymbolicName
                     };
                     var symbolicName = $"relationship{relationships.Count}";
 
                     relationships.Add(symbolicName, relationship);
 
-                    var parentEntitySymbolicName = entities.First(kvp => kvp.Value.Name == nodeName).Key;
-                    var childEntitySymbolicName = entities.First(kvp => kvp.Value.Name == childNodeId).Key;
-
                     bicepBuilder.AppendLine();
-                    bicepBuilder.AppendLine(relationship.ToBicepString(symbolicName, parent: modelSymbolicName,
-                        dependsOn: [parentEntitySymbolicName, childEntitySymbolicName]));
+                    bicepBuilder.AppendLine(relationship.ToBicepString(symbolicName, parent: modelSymbolicName));
                 }
             }
 

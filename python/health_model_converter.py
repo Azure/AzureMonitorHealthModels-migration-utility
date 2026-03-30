@@ -278,27 +278,27 @@ class Entity:
         self.api_version = API_VERSION
         self.signal_groups = {}
     
-    def add_azure_resource_signals(self, resource_id: str, auth_setting: str, signals: List[dict]):
+    def add_azure_resource_signals(self, resource_id: str, auth_setting_symbolic: str, signals: List[dict]):
         """Add Azure Resource Metric signal group with inline signal instances."""
         self.signal_groups['azureResource'] = {
             'resource_id': resource_id,
-            'auth_setting': auth_setting,
+            'auth_setting_symbolic': auth_setting_symbolic,
             'signals': signals
         }
     
-    def add_log_analytics_signals(self, workspace_id: str, auth_setting: str, signals: List[dict]):
+    def add_log_analytics_signals(self, workspace_id: str, auth_setting_symbolic: str, signals: List[dict]):
         """Add Log Analytics signal group with inline signal instances."""
         self.signal_groups['azureLogAnalytics'] = {
             'resource_id': workspace_id,
-            'auth_setting': auth_setting,
+            'auth_setting_symbolic': auth_setting_symbolic,
             'signals': signals
         }
     
-    def add_prometheus_signals(self, workspace_id: str, auth_setting: str, signals: List[dict]):
+    def add_prometheus_signals(self, workspace_id: str, auth_setting_symbolic: str, signals: List[dict]):
         """Add Azure Monitor Workspace signal group with inline signal instances."""
         self.signal_groups['azureMonitorWorkspace'] = {
             'resource_id': workspace_id,
-            'auth_setting': auth_setting,
+            'auth_setting_symbolic': auth_setting_symbolic,
             'signals': signals
         }
     
@@ -341,7 +341,7 @@ class Entity:
             signals_str = self._build_signals_array(group['signals'])
             parts.append(f"""    azureResource: {{
       azureResourceId: '{group['resource_id']}'
-      authenticationSetting: '{group['auth_setting']}'
+      authenticationSetting: {group['auth_setting_symbolic']}.name
       signals: {signals_str}
     }}""")
         else:
@@ -353,7 +353,7 @@ class Entity:
             signals_str = self._build_signals_array(group['signals'])
             parts.append(f"""    azureLogAnalytics: {{
       logAnalyticsWorkspaceResourceId: '{group['resource_id']}'
-      authenticationSetting: '{group['auth_setting']}'
+      authenticationSetting: {group['auth_setting_symbolic']}.name
       signals: {signals_str}
     }}""")
         else:
@@ -365,7 +365,7 @@ class Entity:
             signals_str = self._build_signals_array(group['signals'])
             parts.append(f"""    azureMonitorWorkspace: {{
       azureMonitorWorkspaceResourceId: '{group['resource_id']}'
-      authenticationSetting: '{group['auth_setting']}'
+      authenticationSetting: {group['auth_setting_symbolic']}.name
       signals: {signals_str}
     }}""")
         else:
@@ -453,25 +453,25 @@ def build_prometheus_signal_bicep(query: 'V1Query') -> str:
 class Relationship:
     """Relationship resource."""
     
-    def __init__(self, name: str, parent_entity: str, child_entity: str):
+    def __init__(self, name: str, parent_entity: str, child_entity: str,
+                 parent_entity_symbolic: str, child_entity_symbolic: str):
         self.name = name
         self.parent_entity = parent_entity
         self.child_entity = child_entity
+        self.parent_entity_symbolic = parent_entity_symbolic
+        self.child_entity_symbolic = child_entity_symbolic
         self.type = f"{PROVIDER_NAMESPACE}/{HEALTH_MODELS_RESOURCE_TYPE}/relationships"
         self.api_version = API_VERSION
     
-    def to_bicep(self, symbolic_name: str, parent: str, depends_on: Optional[List[str]] = None) -> str:
+    def to_bicep(self, symbolic_name: str, parent: str) -> str:
         """Generate Bicep representation."""
-        depends_str = BicepBuilder.format_depends_on(depends_on)
-        
         return f"""resource {symbolic_name} '{self.type}@{self.api_version}' = {{
   parent: {parent}
   name: '{self.name}'
   properties: {{
-    parentEntityName: '{self.parent_entity}'
-    childEntityName: '{self.child_entity}'
+    parentEntityName: {self.parent_entity_symbolic}.name
+    childEntityName: {self.child_entity_symbolic}.name
   }}
-  dependsOn: {depends_str}
 }}"""
 
 # ============================================================================
@@ -596,7 +596,6 @@ class HealthModelConverter:
                         
                         if auth_setting_key:
                             auth_setting = authentication_settings[auth_setting_key]
-                            depends_on.append(auth_setting_key)
                             
                             # Group queries by type
                             resource_metrics = [q for q in enabled_queries 
@@ -622,7 +621,7 @@ class HealthModelConverter:
                                 signals = [{'bicep': build_azure_resource_signal_bicep(q)} for q in resource_metrics]
                                 entity.add_azure_resource_signals(
                                     azure_resource_id,
-                                    auth_setting.name,
+                                    auth_setting_key,
                                     signals
                                 )
                             
@@ -631,7 +630,7 @@ class HealthModelConverter:
                                 signals = [{'bicep': build_log_analytics_signal_bicep(q)} for q in log_analytics]
                                 entity.add_log_analytics_signals(
                                     node.logAnalyticsResourceId,
-                                    auth_setting.name,
+                                    auth_setting_key,
                                     signals
                                 )
                             
@@ -640,7 +639,7 @@ class HealthModelConverter:
                                 signals = [{'bicep': build_prometheus_signal_bicep(q)} for q in prometheus]
                                 entity.add_prometheus_signals(
                                     node.azureMonitorWorkspaceResourceId,
-                                    auth_setting.name,
+                                    auth_setting_key,
                                     signals
                                 )
                 
@@ -664,12 +663,6 @@ class HealthModelConverter:
                 
                 if node.childNodeIds:
                     for child_id in node.childNodeIds:
-                        relationship_name = generate_deterministic_guid(f"{node_name}-{child_id}")
-                        relationship = Relationship(relationship_name, node_name, child_id)
-                        
-                        symbolic_name = f"relationship{len(relationships)}"
-                        relationships[symbolic_name] = relationship
-                        
                         # Find parent and child entity symbolic names
                         parent_entity_key = None
                         child_entity_key = None
@@ -680,15 +673,19 @@ class HealthModelConverter:
                             if entity.name == child_id:
                                 child_entity_key = key
                         
-                        depends_on = []
-                        if parent_entity_key:
-                            depends_on.append(parent_entity_key)
-                        if child_entity_key:
-                            depends_on.append(child_entity_key)
+                        relationship_name = generate_deterministic_guid(f"{node_name}-{child_id}")
+                        relationship = Relationship(
+                            relationship_name, node_name, child_id,
+                            parent_entity_key or "entity0",
+                            child_entity_key or "entity0"
+                        )
+                        
+                        symbolic_name = f"relationship{len(relationships)}"
+                        relationships[symbolic_name] = relationship
                         
                         bicep_lines.append("")
                         bicep_lines.append(relationship.to_bicep(
-                            symbolic_name, model_symbolic_name, depends_on
+                            symbolic_name, model_symbolic_name
                         ))
             
             return "\n".join(bicep_lines)
